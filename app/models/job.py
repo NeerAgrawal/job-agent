@@ -27,6 +27,11 @@ class Job(BaseModel):
     # AI processing fields
     match_score = Column(Float, nullable=True, index=True)  # 0-100 match score
     transition_probability = Column(Float, nullable=True)  # 0-1 probability
+    semantic_score = Column(Float, nullable=True, index=True)  # Semantic similarity score
+    final_score = Column(Float, nullable=True, index=True)  # Final comprehensive score
+    salary_score = Column(Float, nullable=True, index=True)  # Salary desirability score
+    transition_score = Column(Float, nullable=True, index=True)  # PM transition readiness score
+    relevance_reason = Column(Text, nullable=True)  # AI-generated relevance explanation
     
     # Application tracking
     application_status = Column(String(50), default="not_applied", index=True)  # not_applied, applied, interviewing, rejected, offered
