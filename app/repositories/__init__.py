@@ -1,4 +1,4 @@
-"""Database repositories package."""
+"""Repository classes for database operations."""
 
 from .base import BaseRepository
 from .job import JobRepository
@@ -9,9 +9,9 @@ from .scoring_log import ScoringLogRepository
 
 __all__ = [
     "BaseRepository",
-    "JobRepository", 
-    "ApplicationRepository", 
-    "OutreachRepository", 
-    "ResumeVersionRepository", 
+    "JobRepository",
+    "ApplicationRepository",
+    "OutreachRepository",
+    "ResumeVersionRepository",
     "ScoringLogRepository"
 ]

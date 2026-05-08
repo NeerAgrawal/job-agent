@@ -2,7 +2,7 @@
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database.engine import engine
-from app.database.base import Base
+from app.models import Base
 from app.core.logging import logger
 
 

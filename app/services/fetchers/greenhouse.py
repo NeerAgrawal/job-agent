@@ -1,288 +1,476 @@
 """Greenhouse job fetcher implementation."""
 
 import asyncio
-import logging
 from typing import List, Optional, Dict, Any
-from datetime import datetime, timedelta
-from urllib.parse import urlparse, parse_qs
+from datetime import datetime
+
 import httpx
 
 from app.services.fetchers.base import BaseFetcher
-from app.schemas.job import JobCreate, JobResponse
-from app.database.repositories import JobRepository
-from app.database.session import get_db_session
+from app.schemas.job import JobCreate
 from app.core.logging import logger
 
 
 class GreenhouseFetcher(BaseFetcher):
     """Greenhouse job board fetcher."""
-    
-    def __init__(self):
+
+    def __init__(
+        self,
+        company_boards: Optional[List[str]] = None
+    ):
         super().__init__("Greenhouse")
-        self.base_url = "https://boards.greenhouse.io"
-        self.api_url = f"{self.base_url}/workable-jobs/v1"
-        self.session = None
-        self.rate_limiter = asyncio.Semaphore(10)  # 10 concurrent requests
-        
+
+        self.base_url = (
+            "https://boards-api.greenhouse.io/v1"
+        )
+
+        self.company_boards = company_boards or [
+            "stripe",
+            "airbnb",
+            "notion",
+            "openai",
+            "postman"
+        ]
+
+        self.rate_limiter = asyncio.Semaphore(10)
+
     async def fetch_jobs(
-        self, 
+        self,
         limit: int = 50,
         filters: Optional[Dict[str, Any]] = None,
         offset: int = 0
-    ) -> List[JobResponse]:
+    ) -> List[JobCreate]:
         """Fetch jobs from Greenhouse."""
-        self._log_info("Starting Greenhouse job fetch", limit=limit, filters=filters)
-        
+
+        logger.info(
+            f"Starting Greenhouse fetch "
+            f"limit={limit}"
+        )
+
         try:
-            await self._ensure_session()
-            
-            # Build API request
-            params = self._build_api_params(filters, limit)
-            
-            # Make API request
-            jobs_data = await self._make_request(params)
-            
-            if not jobs_data:
-                self._log_error("No jobs data received from Greenhouse", params=params)
-                return []
-            
-            # Parse and normalize jobs
-            jobs = self._parse_jobs_response(jobs_data)
-            normalized_jobs = []
-            
-            for job_data in jobs:
-                normalized_job = await self.validate_job(job_data)
-                if normalized_job:
-                    normalized_jobs.append(normalized_job)
-                else:
-                    self._log_warning(f"Skipping invalid job: {job_data}")
-            
-            # Save to database
-            if normalized_jobs:
-                await self._save_jobs(normalized_jobs)
-                self._log_info(f"Saved {len(normalized_jobs)} jobs to database")
-            else:
-                self._log_warning("No valid jobs to save")
-            
-            # Get statistics
-            stats = await self.get_fetch_statistics()
-            self._log_info(f"Fetch statistics: {stats}")
-            
-            return [JobResponse(**job.__dict__) for job in normalized_jobs]
-            
-        except Exception as e:
-            self._log_error(f"Greenhouse fetch failed: {e}")
+            all_jobs = []
+
+            for company in self.company_boards:
+
+                try:
+                    company_jobs = await self._fetch_company_jobs(
+                        company=company,
+                        limit=limit,
+                        offset=offset
+                    )
+
+                    if company_jobs:
+                        all_jobs.extend(company_jobs)
+
+                        logger.info(
+                            f"Fetched {len(company_jobs)} "
+                            f"jobs from company={company}"
+                        )
+
+                except Exception:
+                    logger.exception(
+                        f"Greenhouse company fetch failed "
+                        f"company={company}"
+                    )
+
+            filtered_jobs = self._apply_filters(
+                all_jobs,
+                filters
+            )
+
+            logger.info(
+                f"Greenhouse fetch completed "
+                f"fetched={len(all_jobs)} "
+                f"filtered={len(filtered_jobs)}"
+            )
+
+            return filtered_jobs[:limit]
+
+        except Exception:
+            logger.exception(
+                "Greenhouse fetch failed"
+            )
+
             return []
-    
-    def _build_api_params(self, filters: Optional[Dict[str, Any]], limit: int) -> Dict[str, Any]:
-        """Build API parameters for Greenhouse API."""
+
+    async def _fetch_company_jobs(
+        self,
+        company: str,
+        limit: int,
+        offset: int
+    ) -> List[JobCreate]:
+        """Fetch jobs for a single company board."""
+
+        url = (
+            f"{self.base_url}/boards/"
+            f"{company}/jobs"
+        )
+
         params = {
             "limit": min(limit, 100),
-            "return": "id,title,company,location,salary,posted_at"
+            "offset": offset,
+            "content": "true"
         }
-        
-        # Add filters
-        if filters:
-            if filters.get("search"):
-                params["query"] = filters["search"]
-            
-            if filters.get("company"):
-                params["company"] = filters["company"]
-            
-            if filters.get("location"):
-                params["location"] = filters["location"]
-            
-            # Add PM-specific filters
-            if filters.get("pm_roles"):
-                params["job_types"] = "product,program,project"
-            
-            if filters.get("remote_only"):
-                params["remote"] = True
-        
-        return params
-    
-    async def _make_request(self, params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Make HTTP request to Greenhouse API."""
+
         headers = {
             "User-Agent": "JobAI-Agent/1.0",
             "Accept": "application/json"
         }
-        
+
         try:
-            async with httpx.AsyncClient(timeout=30) as client:
+            async with httpx.AsyncClient(
+                timeout=30
+            ) as client:
+
                 async with self.rate_limiter:
+
                     response = await client.get(
-                        self.api_url,
+                        url,
                         params=params,
                         headers=headers
                     )
-                    
-                    if response.status_code == 200:
-                        return response.json()
-                    else:
-                        self._log_error(f"API request failed: {response.status_code}", response=response.text)
-                        return None
-        
+
+                    if response.status_code == 404:
+
+                        logger.warning(
+                            f"Greenhouse board not found "
+                            f"company={company}"
+                        )
+
+                        return []
+
+                    response.raise_for_status()
+
+                    data = response.json()
+
+                    jobs_data = data.get(
+                        "jobs",
+                        []
+                    )
+
+                    normalized_jobs = []
+
+                    for raw_job in jobs_data:
+
+                        normalized = await self.validate_job(
+                            raw_job
+                        )
+
+                        if normalized:
+                            normalized_jobs.append(
+                                normalized
+                            )
+
+                    return normalized_jobs
+
         except httpx.TimeoutException:
-            self._log_error("Request timeout")
-            return None
-        except Exception as e:
-            self._log_error(f"Request error: {e}")
-            return None
-    
-    def _parse_jobs_response(self, jobs_data: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Parse Greenhouse API response."""
-        if not jobs_data or "jobs" not in jobs_data:
+
+            logger.warning(
+                f"Greenhouse timeout "
+                f"company={company}"
+            )
+
             return []
-        
-        jobs = []
-        
-        for job in jobs_data.get("jobs", []):
-            # Extract basic job information
+
+        except Exception:
+
+            logger.exception(
+                f"Greenhouse request failed "
+                f"company={company}"
+            )
+
+            return []
+
+    def _apply_filters(
+        self,
+        jobs: List[JobCreate],
+        filters: Optional[Dict[str, Any]]
+    ) -> List[JobCreate]:
+        """Apply optional filters."""
+
+        if not filters:
+            return jobs
+
+        filtered_jobs = jobs
+
+        # Search filter
+        if filters.get("search"):
+
+            search_term = (
+                filters["search"]
+                .lower()
+            )
+
+            filtered_jobs = [
+                job for job in filtered_jobs
+                if (
+                    search_term in job.title.lower()
+                    or search_term in job.company.lower()
+                    or search_term in job.jd_text.lower()
+                )
+            ]
+
+        # Location filter
+        if filters.get("location"):
+
+            location_filter = (
+                filters["location"]
+                .lower()
+            )
+
+            filtered_jobs = [
+                job for job in filtered_jobs
+                if location_filter in job.location.lower()
+            ]
+
+        # Remote filter
+        if filters.get("remote_status"):
+
+            remote_filter = (
+                filters["remote_status"]
+                .lower()
+            )
+
+            filtered_jobs = [
+                job for job in filtered_jobs
+                if job.remote_status.lower()
+                == remote_filter
+            ]
+
+        return filtered_jobs
+
+    async def validate_job(
+        self,
+        job_data: Dict[str, Any]
+    ) -> Optional[JobCreate]:
+        """Validate and normalize Greenhouse job."""
+
+        try:
+            location_data = job_data.get(
+                "location",
+                {}
+            )
+
+            if isinstance(location_data, dict):
+                location = location_data.get(
+                    "name",
+                    ""
+                )
+            else:
+                location = str(location_data)
+
+            metadata = job_data.get(
+                "metadata",
+                []
+            )
+
+            description = (
+                job_data.get("content", "")
+                or job_data.get("description", "")
+                or ""
+            )
+
+            compensation = (
+                self._extract_compensation(
+                    metadata
+                )
+            )
+
             job_dict = {
-                "title": job.get("title", ""),
-                "company": job.get("company", ""),
-                "location": job.get("location", ""),
-                "salary": self._parse_salary(job.get("compensation", {})),
+                "title": job_data.get(
+                    "title",
+                    ""
+                ),
+                "company": job_data.get(
+                    "company_name",
+                    ""
+                ),
+                "location": location,
+                "salary": compensation,
                 "source": "Greenhouse",
-                "job_url": job.get("absolute_url", ""),
-                "posted_at": self._parse_datetime(job.get("published_at", "")),
-                "jd_text": job.get("description", ""),
-                "applicant_count": job.get("stats", {}).get("applicant_count", 0),
-                "remote_status": self._determine_remote_status(job),
-                "domain_tags": self._extract_domain_tags(job.get("description", "")),
-                "raw_metadata": job
+                "job_url": job_data.get(
+                    "absolute_url",
+                    ""
+                ),
+                "posted_at": self._parse_datetime(
+                    job_data.get(
+                        "updated_at",
+                        ""
+                    )
+                ),
+                "jd_text": description,
+                "applicant_count": 0,
+                "remote_status": (
+                    self._determine_remote_status(
+                        location,
+                        description
+                    )
+                ),
+                "domain_tags": (
+                    self._extract_domain_tags(
+                        description
+                    )
+                ),
+                "raw_metadata": job_data
             }
-            
-            jobs.append(job_dict)
-        
-        return jobs
-    
-    def _parse_salary(self, compensation: Dict[str, Any]) -> Optional[float]:
-        """Parse salary from compensation object."""
-        if not compensation:
+
+            return JobCreate(**job_dict)
+
+        except Exception:
+
+            logger.exception(
+                "Greenhouse job validation failed"
+            )
+
             return None
-        
-        # Extract salary information
-        min_salary = compensation.get("min", {}).get("amount", 0)
-        max_salary = compensation.get("max", {}).get("amount", 0)
-        currency = compensation.get("currency", {}).get("code", "USD")
-        
-        if currency == "USD" and min_salary:
-            return min_salary
-        
+
+    def _extract_compensation(
+    self,
+    metadata: List[Dict[str, Any]]
+    ) -> Optional[float]:
+        """Extract compensation safely."""
+
+        if not metadata:
+            return None
+
+        import re
+
+        for item in metadata:
+
+            try:
+                raw_name = item.get("name", "")
+                raw_value = item.get("value", "")
+
+                name = str(raw_name).lower()
+                value = str(raw_value).lower()
+
+                if (
+                    "salary" in name
+                    or "compensation" in name
+                    or "pay" in name
+                ):
+
+                    matches = re.findall(
+                        r"\d+(?:,\d+)?",
+                        value
+                    )
+
+                    if matches:
+
+                        amount = float(
+                            matches[0].replace(",", "")
+                        )
+
+                        if amount < 1000:
+                            amount *= 1000
+
+                        return amount
+
+            except Exception as e:
+
+                logger.warning(
+                    f"Compensation parsing failed: {e}"
+                )
+
+                continue
+
         return None
-    
-    def _parse_datetime(self, date_str: str) -> Optional[datetime]:
-        """Parse ISO datetime string."""
+
+    def _parse_datetime(
+        self,
+        date_str: str
+    ) -> Optional[datetime]:
+        """Parse datetime safely."""
+
         if not date_str:
             return None
-        
+
         try:
-            # Handle different datetime formats
-            if "T" in date_str:
-                return datetime.fromisoformat(date_str.replace("Z", "+00:00"))
-            else:
-                return datetime.fromisoformat(date_str)
-        except ValueError:
-            self._log_warning(f"Invalid datetime format: {date_str}")
+            if date_str.endswith("Z"):
+
+                return datetime.fromisoformat(
+                    date_str.replace(
+                        "Z",
+                        "+00:00"
+                    )
+                )
+
+            return datetime.fromisoformat(
+                date_str
+            )
+
+        except Exception:
+
+            logger.warning(
+                f"Invalid datetime "
+                f"format={date_str}"
+            )
+
             return None
-    
-    def _determine_remote_status(self, job: Dict[str, Any]) -> str:
-        """Determine remote status from job data."""
-        location = job.get("location", "").lower()
-        description = job.get("description", "").lower()
-        
-        if "remote" in location or "remote" in description or "work from home" in description:
+
+    def _determine_remote_status(
+        self,
+        location: str,
+        description: str
+    ) -> str:
+        """Determine remote/hybrid/onsite."""
+
+        location_lower = location.lower()
+        description_lower = description.lower()
+
+        if (
+            "remote" in location_lower
+            or "remote" in description_lower
+            or "work from home"
+            in description_lower
+        ):
             return "remote"
-        elif "hybrid" in location or "hybrid" in description:
+
+        if (
+            "hybrid" in location_lower
+            or "hybrid" in description_lower
+        ):
             return "hybrid"
-        else:
-            return "onsite"
-    
-    def _extract_domain_tags(self, description: str) -> List[str]:
-        """Extract domain tags from job description."""
+
+        return "onsite"
+
+    def _extract_domain_tags(
+        self,
+        description: str
+    ) -> List[str]:
+        """Extract PM-related domain tags."""
+
         if not description:
             return []
-        
-        # Common PM domains
+
         pm_domains = [
-            "product management", "saas", "b2b", "analytics", "marketing",
-            "technical", "engineering", "development", "api", "platform",
-            "ai", "machine learning", "data", "infrastructure", "devops",
-            "strategy", "operations", "finance", "business", "growth"
+            "product",
+            "saas",
+            "b2b",
+            "analytics",
+            "technical",
+            "engineering",
+            "api",
+            "platform",
+            "ai",
+            "machine learning",
+            "data",
+            "infrastructure",
+            "devops",
+            "strategy",
+            "growth",
+            "microservices"
         ]
-        
-        # Extract tags based on keywords
+
+        description_lower = (
+            description.lower()
+        )
+
         tags = []
-        description_lower = description.lower()
-        
+
         for domain in pm_domains:
-            if any(keyword in description_lower for keyword in domain.split()):
+
+            if domain in description_lower:
                 tags.append(domain)
-        
-        # Remove duplicates
+
         return list(set(tags))
-    
-    async def _ensure_session(self):
-        """Ensure database session is available."""
-        if not self.session:
-            self.session = await get_db_session()
-    
-    async def _save_jobs(self, jobs: List[Dict[str, Any]]) -> int:
-        """Save jobs to database."""
-        if not jobs:
-            return 0
-        
-        await self._ensure_session()
-        job_repo = JobRepository(self.session)
-        
-        saved_count = 0
-        for job_data in jobs:
-            try:
-                job_create = JobCreate(**job_data)
-                job = await job_repo.create(job_create.dict())
-                saved_count += 1
-                self._log_debug(f"Saved job: {job.title}")
-            except Exception as e:
-                self._log_error(f"Failed to save job: {e}")
-        
-        return saved_count
-    
-    async def get_fetch_statistics(self) -> Dict[str, Any]:
-        """Get fetch statistics for Greenhouse."""
-        await self._ensure_session()
-        job_repo = JobRepository(self.session)
-        
-        try:
-            total_jobs = await job_repo.count()
-            recent_jobs = await job_repo.get_recent_jobs(days=7)
-            
-            return {
-                "total_fetched": total_jobs,
-                "recent_jobs": len(recent_jobs),
-                "last_fetch": datetime.utcnow().isoformat()
-            }
-        except Exception as e:
-            self._log_error(f"Failed to get statistics: {e}")
-            return {}
-    
-    async def validate_job(self, job_data: Dict[str, Any]) -> Optional[JobCreate]:
-        """Validate and normalize job data."""
-        try:
-            # Create Pydantic model for validation
-            job = JobCreate(**job_data)
-            
-            # Validate required fields
-            if not job.title or not job.company:
-                raise ValueError("Title and company are required")
-            
-            # Normalize data
-            job.title = self._normalize_title(job.title)
-            job.company = self._normalize_company(job.company)
-            job.location = self._normalize_location(job.location)
-            
-            return job
-        except Exception as e:
-            self._log_error(f"Job validation failed: {e}")
-            return None

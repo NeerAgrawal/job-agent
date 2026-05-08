@@ -7,6 +7,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.dialects.postgresql import UUID
 
 
+# Single authoritative Base for all models
 Base = declarative_base()
 
 

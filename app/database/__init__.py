@@ -1,42 +1,23 @@
 """Database package for all database-related functionality."""
 
+from .base import Base
 from .engine import engine
 from .session import get_db_session
-from .models import Base
-from .repositories import (
-    BaseRepository,
-    JobRepository, 
-    ApplicationRepository, 
-    OutreachRepository, 
-    ResumeVersionRepository, 
-    ScoringLogRepository
-)
-from .migrations import create_tables
+from .migrations import create_tables, drop_tables
 from .health import (
     check_database_connection,
     check_table_health,
-    check_database_performance,
-    get_comprehensive_health_check,
-    get_database_statistics
+    check_database_performance
 )
 from .seed import seed_database, clear_database
 
 __all__ = [
-    "engine",
-    "get_db_session", 
     "Base",
-    "BaseRepository",
-    "JobRepository", 
-    "ApplicationRepository", 
-    "OutreachRepository", 
-    "ResumeVersionRepository", 
-    "ScoringLogRepository",
+    "engine",
+    "get_db_session",
     "create_tables",
+    "drop_tables",
     "check_database_connection",
-    "check_table_health", 
-    "check_database_performance",
-    "get_comprehensive_health_check",
-    "get_database_statistics",
-    "seed_database",
-    "clear_database"
+    "check_database_health",
+    "seed_database"
 ]

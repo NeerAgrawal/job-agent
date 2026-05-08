@@ -6,14 +6,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.engine import engine
 from app.database.session import get_db_session
-from app.database.repositories import (
-    JobRepository, 
-    ApplicationRepository, 
+from app.repositories import (
+    JobRepository,
+    ApplicationRepository,
     OutreachRepository,
     ResumeVersionRepository,
     ScoringLogRepository
 )
-from app.models.entities import Job, Application, Outreach, ResumeVersion, ScoringLog
+from app.models import Job, Application, Outreach, ResumeVersion, ScoringLog
 from app.core.logging import logger
 
 

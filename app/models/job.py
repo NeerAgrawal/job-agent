@@ -1,7 +1,7 @@
 from sqlalchemy import Column, String, Text, DateTime, Boolean, Float, JSON, Integer
 from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import UUID
-from app.database.base import BaseModel
+from .base import BaseModel
 
 
 class Job(BaseModel):

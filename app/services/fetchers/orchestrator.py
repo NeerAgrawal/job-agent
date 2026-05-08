@@ -1,79 +1,193 @@
 """Fetcher orchestrator for coordinating multiple job fetchers."""
 
 import asyncio
-import logging
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 
-from app.services.fetchers.base import BaseFetcher
 from app.services.fetchers.greenhouse import GreenhouseFetcher
 from app.services.fetchers.lever import LeverFetcher
 from app.services.fetchers.wellfound import WellfoundFetcher
-from app.database.repositories import JobRepository
+
+from app.repositories.job import JobRepository
 from app.database.session import get_db_session
+from app.schemas.job import JobCreate
 from app.core.logging import logger
 
 
 class FetcherOrchestrator:
     """Orchestrates multiple job fetchers."""
-    
+
     def __init__(self):
-        self.logger = logging.getLogger(f"{__name__}.FetcherOrchestrator")
+        self.logger = logger.bind(service="orchestrator")
+
         self.fetchers = {
-            "greenhouse": GreenhouseFetcher(),
+            "greenhouse": GreenhouseFetcher(
+                company_boards=[
+                    "stripe",
+                    "airbnb",
+                    "notion",
+                    "openai"
+                ]
+            ),
             "lever": LeverFetcher(),
             "wellfound": WellfoundFetcher()
         }
-        
-    async def fetch_all_jobs(
+
+        # bounded concurrency
+        self.semaphore = asyncio.Semaphore(3)
+
+    async def fetch_from_all_sources(
         self,
         limit: int = 50,
-        filters: Optional[Dict[str, Any]] = None,
-        **kwargs
-    ) -> List[Dict[str, Any]]:
-        """Fetch jobs from all available sources."""
-        self.logger.info("Starting orchestrated job fetch from all sources")
-        
+        filters: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """Fetch jobs from all configured sources."""
+
+        self.logger.info(
+            f"Starting orchestrated fetch "
+            f"limit={limit}"
+        )
+
         try:
-            # Create tasks for all fetchers
-            tasks = []
-            for source_name, fetcher in self.fetchers.items():
-                if filters and filters.get("sources") and source_name not in filters["sources"]:
-                    continue  # Skip filtered sources
-                
-                task = asyncio.create_task(
-                    fetcher.fetch_jobs(limit=limit, filters=filters, **kwargs)
+            tasks = [
+                self._safe_fetch(
+                    source_name,
+                    fetcher,
+                    limit,
+                    filters
                 )
-                tasks.append(task)
-            
-            # Wait for all tasks to complete
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            
-            # Combine all results
+                for source_name, fetcher
+                in self.fetchers.items()
+            ]
+
+            results = await asyncio.gather(
+                *tasks,
+                return_exceptions=False
+            )
+
             all_jobs = []
+            fetch_results = {}
+
             for result in results:
-                if isinstance(result, list):
-                    all_jobs.extend(result)
-                elif isinstance(result, Exception):
-                    self.logger.error(f"Fetcher {result} failed: {result}")
-                else:
-                    self.logger.warning(f"Unexpected result from fetcher: {result}")
-            
-            # Remove duplicates and apply final filters
-            unique_jobs = self._remove_duplicates(all_jobs)
-            filtered_jobs = self._apply_final_filters(unique_jobs, filters)
-            
-            # Limit results
-            limited_jobs = filtered_jobs[:limit]
-            
-            self.logger.info(f"Orchestrated fetch complete: {len(limited_jobs)} jobs from {len([r for r in results if isinstance(r, list)])} sources")
-            
-            return limited_jobs
-            
-        except Exception as e:
-            self.logger.error(f"Orchestrated fetch failed: {e}")
-            return []
-    
+                source_name = result["source"]
+
+                fetch_results[source_name] = {
+                    "success": result["success"],
+                    "count": len(result["jobs"]),
+                    "error": result.get("error")
+                }
+
+                if result["success"]:
+                    all_jobs.extend(result["jobs"])
+
+            filtered_jobs = self._filter_jobs(
+                all_jobs,
+                filters
+            )
+
+            unique_jobs = self._deduplicate_jobs(
+                filtered_jobs
+            )
+
+            saved_count = await self.save_all_jobs(
+                unique_jobs
+            )
+
+            summary = {
+                "timestamp": datetime.utcnow().isoformat(),
+                "total_sources": len(self.fetchers),
+                "successful_sources": len([
+                    r for r in fetch_results.values()
+                    if r["success"]
+                ]),
+                "failed_sources": len([
+                    r for r in fetch_results.values()
+                    if not r["success"]
+                ]),
+                "total_jobs_fetched": len(all_jobs),
+                "jobs_after_filtering": len(filtered_jobs),
+                "unique_jobs": len(unique_jobs),
+                "jobs_saved": saved_count,
+                "source_results": fetch_results
+            }
+
+            self.logger.info(
+                f"Orchestrated fetch complete "
+                f"fetched={summary['total_jobs_fetched']} "
+                f"saved={saved_count}"
+            )
+
+            return summary
+
+        except Exception:
+            self.logger.exception(
+                "Orchestrated fetch failed"
+            )
+
+            return {
+                "success": False,
+                "error": "orchestrator_failure"
+            }
+
+    async def _safe_fetch(
+        self,
+        source_name: str,
+        fetcher,
+        limit: int,
+        filters: Optional[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """Safely fetch jobs from a source."""
+
+        async with self.semaphore:
+
+            try:
+                self.logger.info(
+                    f"Fetching from source={source_name}"
+                )
+
+                jobs = await asyncio.wait_for(
+                    fetcher.fetch_jobs(
+                        limit=limit,
+                        filters=filters
+                    ),
+                    timeout=60
+                )
+
+                self.logger.info(
+                    f"Fetch success source={source_name} "
+                    f"count={len(jobs)}"
+                )
+
+                return {
+                    "source": source_name,
+                    "success": True,
+                    "jobs": jobs
+                }
+
+            except asyncio.TimeoutError:
+                self.logger.error(
+                    f"Fetch timeout source={source_name}"
+                )
+
+                return {
+                    "source": source_name,
+                    "success": False,
+                    "jobs": [],
+                    "error": "timeout"
+                }
+
+            except Exception:
+                self.logger.exception(
+                    f"Fetch failed source={source_name}"
+                )
+
+                return {
+                    "source": source_name,
+                    "success": False,
+                    "jobs": [],
+                    "error": "fetch_failure"
+                }
+
     async def fetch_from_source(
         self,
         source: str,
@@ -81,119 +195,214 @@ class FetcherOrchestrator:
         filters: Optional[Dict[str, Any]] = None,
         **kwargs
     ) -> List[Dict[str, Any]]:
-        """Fetch jobs from a specific source."""
-        self.logger.info(f"Starting fetch from source: {source}")
-        
+        """Fetch from a single source."""
+
         if source not in self.fetchers:
-            self.logger.error(f"Unknown source: {source}")
+            self.logger.error(
+                f"Unknown source={source}"
+            )
             return []
-        
-        fetcher = self.fetchers[source]
-        return await fetcher.fetch_jobs(limit=limit, filters=filters, **kwargs)
-    
-    async def get_statistics(self) -> Dict[str, Any]:
-        """Get combined statistics from all fetchers."""
-        self.logger.info("Getting combined fetch statistics")
-        
-        stats = {
-            "total_sources": len(self.fetchers),
-            "active_fetchers": [],
-            "last_fetch": datetime.utcnow().isoformat(),
-            "source_stats": {}
-        }
-        
-        for source_name, fetcher in self.fetchers.items():
-            try:
-                source_stats = await fetcher.get_fetch_statistics()
-                stats["source_stats"][source_name] = source_stats
-                stats["active_fetchers"].append(source_name)
-            except Exception as e:
-                self.logger.error(f"Failed to get stats for {source_name}: {e}")
-                stats["source_stats"][source_name] = {"error": str(e)}
-        
-        return stats
-    
-    def _remove_duplicates(self, jobs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Remove duplicate jobs based on title, company, and job_url."""
+
+        try:
+            fetcher = self.fetchers[source]
+
+            jobs = await fetcher.fetch_jobs(
+                limit=limit,
+                filters=filters,
+                **kwargs
+            )
+
+            return jobs
+
+        except Exception:
+            self.logger.exception(
+                f"Single source fetch failed "
+                f"source={source}"
+            )
+
+            return []
+
+    def _filter_jobs(
+        self,
+        jobs: List[Dict[str, Any]],
+        filters: Optional[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Filter jobs safely."""
+
+        if not filters:
+            return jobs
+
+        filtered_jobs = jobs
+
+        # PM role filtering
+        if filters.get("pm_roles"):
+
+            pm_roles = [
+                role.lower()
+                for role in filters["pm_roles"]
+            ]
+
+            filtered_jobs = [
+                job for job in filtered_jobs
+                if any(
+                    role in job.title.lower()
+                    for role in pm_roles
+                )
+            ]
+
+            self.logger.info(
+                f"PM role filtering returned "
+                f"{len(filtered_jobs)} jobs"
+            )
+
+        # Location filtering
+        if filters.get("locations"):
+
+            allowed_locations = [
+                loc.lower()
+                for loc in filters["locations"]
+            ]
+
+            filtered_jobs = [
+                job for job in filtered_jobs
+                if any(
+                    loc in job.location.lower()
+                    for loc in allowed_locations
+                )
+            ]
+
+            self.logger.info(
+                f"Location filtering returned "
+                f"{len(filtered_jobs)} jobs"
+            )
+
+        # Search filtering
+        if filters.get("search"):
+
+            search_term = filters["search"].lower()
+
+            filtered_jobs = [
+                job for job in filtered_jobs
+                if (
+                    search_term in job.title.lower()
+                    or search_term in job.company.lower()
+                    or search_term in job.jd_text.lower()
+                )
+            ]
+
+            self.logger.info(
+                f"Search filtering returned "
+                f"{len(filtered_jobs)} jobs"
+            )
+
+        return filtered_jobs
+
+    def _deduplicate_jobs(
+        self,
+        jobs: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Remove duplicate jobs."""
+
         seen = set()
         unique_jobs = []
-        
+
         for job in jobs:
-            # Create unique identifier
+
             identifier = (
-                job.get("title", "").lower().strip(),
-                job.get("company", "").lower().strip(),
-                job.get("job_url", "").strip()
+                job.title.lower(),
+                job.company.lower(),
+                job.job_url
             )
-            
+
             if identifier not in seen:
                 seen.add(identifier)
                 unique_jobs.append(job)
-        
+
+        self.logger.info(
+            f"Deduplication reduced "
+            f"{len(jobs)} -> {len(unique_jobs)}"
+        )
+
         return unique_jobs
-    
-    def _apply_final_filters(self, jobs: List[Dict[str, Any]], filters: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Apply final filters after deduplication."""
-        if not filters:
-            return jobs
-        
-        filtered_jobs = jobs
-        
-        # Posted within 24 hours filter
-        if filters.get("posted_within_24h"):
-            cutoff = datetime.utcnow() - timedelta(hours=24)
-            filtered_jobs = [
-                job for job in filtered_jobs
-                if job.get("posted_at") and job.get("posted_at") >= cutoff
-            ]
-        
-        # PM roles filter
-        if filters.get("pm_roles_only"):
-            pm_titles = [
-                "product manager", "associate product manager", "technical product manager",
-                "ai product manager", "platform product manager", "api product manager",
-                "junior product manager", "apm", "product owner"
-            ]
-            
-            filtered_jobs = [
-                job for job in filtered_jobs
-                if any(title in job.get("title", "").lower() for title in pm_titles)
-            ]
-        
-        # Location filter
-        if filters.get("locations"):
-            allowed_locations = [loc.lower() for loc in filters["locations"]]
-            filtered_jobs = [
-                job for job in filtered_jobs
-                if job.get("location", "").lower() in allowed_locations
-            ]
-        
-        return filtered_jobs
-    
-    async def save_all_jobs(self, jobs: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Save jobs from all sources to database."""
-        self.logger.info(f"Saving {len(jobs)} orchestrated jobs to database")
-        
-        from app.database.repositories import JobRepository
-        from app.schemas.job import JobCreate
-        
-        await self._ensure_session()
-        job_repo = JobRepository(self.session)
-        
+
+    async def save_all_jobs(
+        self,
+        jobs: List[JobCreate]
+    ) -> int:
+        """Persist jobs safely."""
+
+        if not jobs:
+            return 0
+
         saved_count = 0
-        for job_data in jobs:
-            try:
-                job_create = JobCreate(**job_data)
-                job = await job_repo.create(job_create.dict())
-                saved_count += 1
-                self.logger.debug(f"Saved job: {job.get('title')}")
-            except Exception as e:
-                self.logger.error(f"Failed to save job: {e}")
-        
-        self.logger.info(f"Successfully saved {saved_count} jobs to database")
-        return {"saved_count": saved_count, "total_jobs": len(jobs)}
-    
-    async def _ensure_session(self):
-        """Ensure database session is available."""
-        if not hasattr(self, 'session') or not self.session:
-            self.session = await get_db_session()
+
+        async with get_db_session() as session:
+
+            repo = JobRepository(session)
+
+            for job in jobs:
+
+                try:
+                    existing_job = await repo.get_by_job_url(
+                        job.job_url
+                    )
+
+                    if existing_job:
+                        self.logger.debug(
+                            f"Duplicate skipped "
+                            f"url={job.job_url}"
+                        )
+                        continue
+
+                    await repo.create(
+                        job.model_dump()
+                    )
+
+                    saved_count += 1
+
+                except Exception:
+                    self.logger.exception(
+                        f"Failed saving job "
+                        f"title={job.title}"
+                    )
+
+        self.logger.info(
+            f"Saved jobs count={saved_count}"
+        )
+
+        return saved_count
+
+    async def get_statistics(
+        self
+    ) -> Dict[str, Any]:
+        """Return orchestrator statistics."""
+
+        try:
+            async with get_db_session() as session:
+
+                repo = JobRepository(session)
+
+                total_jobs = await repo.count()
+
+                recent_jobs = await repo.get_recent_jobs(
+                    days=7
+                )
+
+                return {
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "total_sources": len(self.fetchers),
+                    "total_jobs": total_jobs,
+                    "recent_jobs": len(recent_jobs),
+                    "active_fetchers": list(
+                        self.fetchers.keys()
+                    )
+                }
+
+        except Exception:
+            self.logger.exception(
+                "Failed retrieving orchestrator statistics"
+            )
+
+            return {
+                "error": "statistics_failure"
+            }

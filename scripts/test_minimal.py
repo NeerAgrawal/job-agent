@@ -10,7 +10,7 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 from app.services.fetchers.orchestrator import FetcherOrchestrator
-from app.database.repositories import JobRepository
+from app.repositories import JobRepository
 from app.database.session import get_db_session
 from app.core.logging import setup_logging, logger
 

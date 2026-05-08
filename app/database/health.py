@@ -6,7 +6,7 @@ from sqlalchemy import select, text
 from datetime import datetime, timedelta
 
 from app.database.engine import engine
-from app.database.base import Base
+from app.models import Base
 from app.core.logging import logger
 
 
