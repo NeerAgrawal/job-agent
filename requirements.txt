@@ -1,0 +1,42 @@
+# Core Framework
+fastapi==0.115.0
+uvicorn[standard]==0.30.0
+streamlit==1.40.1
+
+# Database
+sqlalchemy==2.0.23
+alembic==1.12.1
+
+# Configuration & Validation
+pydantic==2.10.0
+pydantic-settings==2.6.0
+python-dotenv==1.0.0
+
+# HTTP Client
+httpx==0.25.2
+
+# Scheduling
+apscheduler==3.10.4
+
+# Logging
+loguru==0.7.2
+
+# Future Support (placeholders)
+playwright==1.40.0
+python-telegram-bot==20.7
+
+# Development
+pytest==7.4.3
+pytest-asyncio==0.21.1
+black==23.11.0
+isort==5.12.0
+mypy==1.7.1
+
+# Utilities
+python-multipart==0.0.6
+jinja2==3.1.2
+
+# Dependency Resolution
+packaging>=24.0
+wheel>=0.47.0
+pillow>=10.0.0
