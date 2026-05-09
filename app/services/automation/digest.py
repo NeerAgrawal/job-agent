@@ -77,34 +77,43 @@ class DigestFormatter:
         return header
     
     def _format_jobs(self, jobs: List[Dict[str, Any]]) -> str:
-        """Format jobs section."""
-        if not jobs:
-            return "❌ No jobs found today."
+        """Format job listings for digest with source metadata."""
+        job_parts = []
         
-        jobs_section = ""
-        
-        for i, job in enumerate(jobs, 1):
-            job_section = f"*{i}. {self._truncate_text(job.get('title', 'Unknown'), self.max_title_length)}*\n"
-            job_section += f"🏢 {job.get('company', 'Unknown')}\n"
-            job_section += f"📍 {job.get('location', 'Unknown')}\n"
-            job_section += f"⭐ Score: {job.get('final_score', 0):.1f}\n"
-            job_section += f"🎯 {job.get('pm_category', 'PM')}\n"
-            
-            # Salary if available
+        for job in jobs:
+            # Extract job details
+            title = job.get('title', 'Unknown')
+            company = job.get('company', 'Unknown')
+            location = job.get('location', 'Unknown')
+            score = job.get('final_score', 0)
             salary = job.get('salary', 'Not specified')
-            if salary and salary != 'Not specified':
-                job_section += f"💰 {salary}\n"
+            remote_status = job.get('remote_status', 'Unknown')
+            source = job.get('source', 'Unknown')
             
-            # Why matched (truncated)
-            reason = job.get('relevance_reason', 'No reason provided')
-            job_section += f"📝 {self._truncate_text(reason, self.max_reason_length)}\n"
+            # Get source quality indicator
+            source_emoji = self._get_source_emoji(source)
+            source_quality = self._get_source_quality_indicator(score, source)
             
             # Direct URL
+            job_section = ""
             job_url = job.get('job_url', '')
             if job_url:
                 job_section += f"🔗 [Apply]({job_url})\n"
             
-            job_section += "\n"
+            job_part = (
+                f"🎯 *{title}*\n"
+                f"🏢 {company}\n"
+                f"📍 {location}\n"
+                f"⭐ Score: {score:.1f}\n"
+                f"💰 {salary}\n"
+                f"🏠 {remote_status}\n"
+                f"{source_emoji} {source_quality}\n"
+                f"🔗 [Apply]({job_url})\n"
+            )
+            
+            job_parts.append(job_part)
+        
+        return "\n".join(job_parts)
             jobs_section += job_section
         
         return jobs_section

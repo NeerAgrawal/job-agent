@@ -8,6 +8,12 @@ from app.services.fetchers.greenhouse import GreenhouseFetcher
 from app.services.fetchers.lever import LeverFetcher
 from app.services.fetchers.wellfound import WellfoundFetcher
 from app.services.fetchers.india import InstahyreFetcher, CutshortFetcher, NaukriFetcher
+from app.services.source_intelligence import (
+    SourceHealthTracker,
+    PMRolePreFilter,
+    SourceAnalytics,
+    FetchEfficiencyAnalyzer
+)
 
 from app.repositories.job import JobRepository
 from app.database.session import get_db_session
@@ -16,18 +22,23 @@ from app.core.logging import logger
 
 
 class FetcherOrchestrator:
-    """Orchestrates multiple job fetchers."""
+    """Orchestrates multiple job fetchers with source intelligence."""
 
     def __init__(self):
         self.logger = logger.bind(service="orchestrator")
+        
+        # Initialize source intelligence components
+        self.health_tracker = SourceHealthTracker()
+        self.prefilter = PMRolePreFilter()
+        self.analytics = SourceAnalytics()
+        self.efficiency_analyzer = FetchEfficiencyAnalyzer()
 
         self.fetchers = {
             "greenhouse": GreenhouseFetcher(
                 company_boards=[
                     "stripe",
                     "airbnb",
-                    "notion",
-                    "openai"
+                    "postman"
                 ]
             ),
             "lever": LeverFetcher(),
@@ -93,38 +104,25 @@ class FetcherOrchestrator:
                 filtered_jobs
             )
 
-            saved_count = await self.save_all_jobs(
-                unique_jobs
-            )
-
+            saved_count = await self.save_all_jobs(all_jobs)
+            
             summary = {
                 "timestamp": datetime.utcnow().isoformat(),
-
                 "total_sources": len(self.fetchers),
-
                 "successful_sources": len([
-                    r for r in fetch_results.values()
+                    r["source"] for r in fetch_results.values()
                     if r["success"]
                 ]),
-
-                "failed_sources": len([
-                    r for r in fetch_results.values()
-                    if not r["success"]
+                "successful_sources": len([
+                    r["source"] for r in fetch_results.values()
+                    if r["success"]
                 ]),
-
                 "total_jobs_fetched": len(all_jobs),
-
-                "jobs_after_filtering": len(filtered_jobs),
-
+                "jobs_after_filtering": len(all_jobs),
                 "unique_jobs": len(unique_jobs),
-
-                # IMPORTANT FIX
                 "saved_count": saved_count,
-
-                # keep old key for backward compatibility
-                "jobs_saved": saved_count,
-
-                "source_results": fetch_results
+                "source_results": fetch_results,
+                "source_intelligence": self._generate_intelligence_summary()
             }
 
             self.logger.info(
@@ -134,6 +132,46 @@ class FetcherOrchestrator:
             )
 
             return summary
+    
+    def _generate_intelligence_summary(self) -> Dict[str, Any]:
+        """Generate source intelligence summary."""
+        try:
+            # Get health metrics from all sources
+            health_summary = self.health_tracker.get_overall_health()
+            
+            # Get efficiency analysis
+            source_data = {}
+            for source_name, metrics in health_summary.get('source_details', {}).items():
+                source_data[source_name] = {
+                    'total_fetched': metrics.get('total_fetched', 0),
+                    'pm_accepted': metrics.get('pm_accepted', 0),
+                    'pm_rejected': metrics.get('pm_rejected', 0),
+                    'pm_density': metrics.get('pm_density', '0%'),
+                    'acceptance_rate': metrics.get('acceptance_rate', '0%'),
+                    'quality_score': metrics.get('quality_score', '0'),
+                    'avg_fetch_duration': metrics.get('avg_fetch_duration', '0s')
+                }
+            
+            # Generate analytics report
+            analytics_report = self.analytics.generate_performance_report(source_data)
+            
+            return {
+                'health_summary': health_summary,
+                'efficiency_analysis': self.efficiency_analyzer.analyze_fetch_efficiency(source_data),
+                'analytics_report': analytics_report,
+                'recommendations': health_summary.get('recommendations', []),
+                'generated_at': datetime.utcnow().isoformat()
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Failed to generate intelligence summary: {e}")
+            return {
+                'health_summary': {'status': 'error'},
+                'efficiency_analysis': {'status': 'error'},
+                'analytics_report': {'status': 'error'},
+                'recommendations': ['Failed to generate intelligence summary'],
+                'generated_at': datetime.utcnow().isoformat()
+            }
 
         except Exception:
             self.logger.exception(
@@ -152,15 +190,18 @@ class FetcherOrchestrator:
         limit: int,
         filters: Optional[Dict[str, Any]]
     ) -> Dict[str, Any]:
-        """Safely fetch jobs from a source."""
-
+        """Safely fetch jobs from a source with intelligence tracking."""
+        
+        # Start tracking fetch
+        self.health_tracker.start_fetch(source_name)
+        fetch_start_time = datetime.utcnow()
+        
         async with self.semaphore:
-
             try:
                 self.logger.info(
                     f"Fetching from source={source_name}"
                 )
-
+                
                 jobs = await asyncio.wait_for(
                     fetcher.fetch_jobs(
                         limit=limit,
@@ -168,37 +209,30 @@ class FetcherOrchestrator:
                     ),
                     timeout=60
                 )
-
-                # Strict PM role filtering
-                filtered_jobs = []
-
-                for job in jobs:
-
-                    title = getattr(job, "title", "")
-
-                    if fetcher.is_pm_role(title):
-
-                        filtered_jobs.append(job)
-
-                    else:
-
-                        self.logger.info(
-                            f"Rejected non-PM role: {title}"
-                        )
-
-                jobs = filtered_jobs
-
-                self.logger.info(
-                    f"Fetch success source={source_name} "
-                    f"count={len(jobs)}"
+                
+                # Apply pre-filtering for early rejection
+                prefilter_result = self.prefilter.prefilter_jobs(jobs)
+                filtered_jobs = prefilter_result['accepted']
+                rejected_jobs = prefilter_result['rejected']
+                
+                # Record fetch metrics
+                fetch_duration = (datetime.utcnow() - fetch_start_time).total_seconds()
+                self.health_tracker.record_fetch_result(
+                    source_name=source_name,
+                    total_fetched=len(jobs),
+                    pm_accepted=len(filtered_jobs),
+                    pm_rejected=len(rejected_jobs),
+                    duration=fetch_duration
                 )
-
+                
                 return {
                     "source": source_name,
                     "success": True,
-                    "jobs": jobs
+                    "jobs": filtered_jobs,
+                    "count": len(filtered_jobs),
+                    "prefilter_stats": prefilter_result['stats']
                 }
-
+                
             except asyncio.TimeoutError:
                 self.logger.error(
                     f"Fetch timeout source={source_name}"

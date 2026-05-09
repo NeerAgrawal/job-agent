@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from app.core.logging import logger
 from .title_filters import is_pm_role, is_reject_role
 from .seniority import SeniorityDetector, SeniorityLevel
+from app.services.source_intelligence.source_weights import SourceWeightManager
 
 
 @dataclass
@@ -35,6 +36,7 @@ class ScoringEngine:
         self.logger = logger.bind(service="scorer")
         self.minimum_quality_score = 40.0
         self.seniority_detector = SeniorityDetector()
+        self.weight_manager = SourceWeightManager()
         
         # Rebalanced scoring weights for transition awareness
         self.semantic_weight = 0.2      # Reduced from 0.3
@@ -96,9 +98,17 @@ class ScoringEngine:
             # 8. Location Preference Score (5%)
             scores["location"] = self._score_location_preference(job_data, resume_profile)
             
+            # 9. Source Quality Bonus (5%)
+            source_bonus = 0.0
+            if hasattr(job_data, 'source') and job_data.source:
+                source_bonus = self.weight_manager.get_source_bonus(job_data.source, final_score)
+            
+            # Calculate final weighted score
+            final_weighted_score = final_score + source_bonus
+            
             # Apply quality threshold
-            if final_score < self.minimum_quality_score:
-                self.logger.info(f"Job score {final_score} below threshold {self.minimum_quality_score}")
+            if final_weighted_score < self.minimum_quality_score:
+                self.logger.info(f"Job score {final_weighted_score} below threshold {self.minimum_quality_score}")
                 return None
             
             return JobScore(
@@ -113,7 +123,7 @@ class ScoringEngine:
                 salary_score=salary_score,
                 recency_score=recency_score,
                 location_score=location_score,
-                final_score=final_score,
+                final_score=final_weighted_score,
                 relevance_reason=relevance_reason
             )
             

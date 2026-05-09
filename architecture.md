@@ -350,6 +350,37 @@ job_ai_agent/
 - Archive policies for old data
 - Backup and recovery procedures
 
+## 🇮🇳 India Source Expansion (v0.5-stable-india-foundation)
+
+### New India Fetchers Architecture
+- **BaseIndiaFetcher**: Common base class for all India job sources
+- **InstahyreFetcher**: Async HTTP + BeautifulSoup implementation
+- **CutshortFetcher**: Enhanced parsing with robust selectors
+- **NaukriFetcher**: Lightweight implementation with proper headers
+- **IndiaFetchUtils**: Shared utilities for URL validation, location normalization
+- **SourceHealthTracker**: Health monitoring and performance metrics
+
+### Enhanced PM Filtering
+- Strict PM role validation (Product Manager, Associate PM, Technical PM, etc.)
+- Reject non-PM roles (Sales, QA, Recruiter, Support, etc.)
+- India-specific location normalization (Bangalore, Hyderabad, Pune, etc.)
+- Salary parsing for LPA format and ranges
+- Domain tag extraction (SaaS, FinTech, Healthcare, etc.)
+
+### Integration Improvements
+- Seamless integration into existing orchestrator
+- Maintained async stability with httpx.AsyncClient
+- Preserved existing Greenhouse/Lever flow
+- Added proper error handling and retry logic
+- Enhanced logging with structured context
+
+### Production Enhancements
+- User-Agent headers for better compatibility
+- HTTP transport with retries
+- SSL verification options
+- Debug file generation for troubleshooting
+- Git ignore for temporary debug files
+
 ## 🔮 Future Enhancements
 
 ### AI/ML Features
@@ -384,6 +415,15 @@ This document will be updated as the system evolves. Key changes will be tracked
   - FastAPI and Streamlit foundations
   - Placeholder for future features
 
+- **v0.5-stable-india-foundation** (2026-05-09): India source expansion
+  - Complete India fetcher architecture with BaseIndiaFetcher
+  - Instahyre, Cutshort, Naukri integration
+  - Enhanced PM filtering and India location normalization
+  - Source health tracking and utilities
+  - Production-stable async implementation
+  - Seamless orchestrator integration
+  - Enhanced error handling and logging
+
 ---
 
-*Last Updated: May 6, 2026*
+*Last Updated: May 9, 2026*
