@@ -76,42 +76,8 @@ class WellfoundFetcher(BaseFetcher):
         """
 
         try:
-            # Mock fallback jobs
-            # Replace later with Playwright/browser automation
-            mock_jobs = [
-                {
-                    "title": "Associate Product Manager",
-                    "company": "AI Startup Labs",
-                    "location": "Remote",
-                    "salary": {
-                        "display": "$90k-$120k"
-                    },
-                    "url": "https://wellfound.com/jobs/apm-1",
-                    "posted_at": datetime.utcnow().isoformat(),
-                    "description": (
-                        "Looking for a technical APM with "
-                        "API platform exposure and AI tooling interest."
-                    ),
-                    "applicant_count": 23
-                },
-                {
-                    "title": "Technical Product Manager",
-                    "company": "CloudScale",
-                    "location": "Bengaluru",
-                    "salary": {
-                        "display": "$120k-$150k"
-                    },
-                    "url": "https://wellfound.com/jobs/tpm-2",
-                    "posted_at": datetime.utcnow().isoformat(),
-                    "description": (
-                        "Platform PM role involving APIs, "
-                        "microservices, infrastructure, and analytics."
-                    ),
-                    "applicant_count": 11
-                }
-            ]
-
-            return mock_jobs
+            # Temporarily disabled - return empty list until real scraping is implemented
+            return []
 
         except Exception:
             logger.exception(

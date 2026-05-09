@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 from app.services.ai.embeddings import EmbeddingsEngine
 from app.core.logging import logger
+from .title_filters import is_pm_role, is_reject_role, is_transition_friendly
 
 
 @dataclass
@@ -17,6 +18,7 @@ class JobMatch:
     company: str
     similarity_score: float
     relevance_reason: str
+    transition_friendly: bool = False
 
 
 class MatchingEngine:
@@ -59,15 +61,28 @@ class MatchingEngine:
                         similarity_score=float(similarity),
                         relevance_reason=self._generate_relevance_reason(similarity, job)
                     )
+                    
+                    # Add transition-friendly flag
+                    if is_transition_friendly(job.title):
+                        match.transition_friendly = True
+                    
                     matches.append(match)
             
-            # Sort by similarity score
-            matches.sort(key=lambda x: x.similarity_score, reverse=True)
+            # Sort with transition-friendly priority
+            transition_friendly_matches = [m for m in matches if hasattr(m, 'transition_friendly')]
+            other_pm_matches = [m for m in matches if not hasattr(m, 'transition_friendly')]
+            
+            # Sort each group by similarity score (descending)
+            transition_friendly_sorted = sorted(transition_friendly_matches, key=lambda x: x.similarity_score, reverse=True)
+            other_pm_sorted = sorted(other_pm_matches, key=lambda x: x.similarity_score, reverse=True)
+            
+            # Combine: transition-friendly first, then other PM roles
+            final_matches = transition_friendly_sorted + other_pm_sorted
             
             # Return top matches
-            top_matches = matches[:top_k]
+            top_matches = final_matches[:top_k]
             
-            self.logger.info(f"Found {len(top_matches)} top matches")
+            self.logger.info(f"Found {len(top_matches)} top matches ({len(transition_friendly_sorted)} transition-friendly)")
             return top_matches
             
         except Exception as e:
@@ -128,12 +143,35 @@ class MatchingEngine:
     async def match_jobs_to_resume(
         self,
         resume_text: str,
-        jobs: List[Dict[str, Any]],
+        jobs: List[Any],
         top_k: int = 10
     ) -> List[JobMatch]:
-        """Match jobs to resume text."""
+        """Match jobs to resume using semantic similarity."""
         try:
             self.logger.info(f"Matching {len(jobs)} jobs to resume")
+            
+            # Filter to PM roles with transition awareness
+            pm_jobs = []
+            non_pm_jobs = []
+            transition_friendly_jobs = []
+        
+            for job in jobs:
+                if is_pm_role(job.title):
+                    if is_transition_friendly(job.title):
+                        transition_friendly_jobs.append(job)
+                    else:
+                        pm_jobs.append(job)
+                elif is_reject_role(job.title):
+                    non_pm_jobs.append(job)
+                else:
+                    # Edge case - treat as non-PM for safety
+                    non_pm_jobs.append(job)
+            
+            self.logger.info(f"Filtered to {len(pm_jobs)} PM jobs, {len(transition_friendly_jobs)} transition-friendly jobs, and {len(non_pm_jobs)} non-PM jobs")
+            
+            if not pm_jobs and not transition_friendly_jobs:
+                self.logger.warning("No PM-relevant jobs found after filtering")
+                return []
             
             # Generate resume embedding
             resume_embedding = await self.embeddings_engine.embed_resume(resume_text)
@@ -142,7 +180,7 @@ class MatchingEngine:
                 return []
             
             # Generate job embeddings
-            job_texts = [job.jd_text for job in jobs]
+            job_texts = [job.jd_text for job in pm_jobs]
             job_embeddings = await self.embeddings_engine.embed_jobs_batch(job_texts)
             
             if not job_embeddings:
@@ -153,12 +191,18 @@ class MatchingEngine:
             matches = await self.find_matches(
                 resume_embedding,
                 job_embeddings,
-                jobs,
+                pm_jobs,
                 top_k
             )
             
-            self.logger.info(f"Successfully matched {len(matches)} jobs")
-            return matches
+            # Sort by similarity score
+            matches.sort(key=lambda x: x.similarity_score, reverse=True)
+            
+            # Return top matches
+            top_matches = matches[:top_k]
+            
+            self.logger.info(f"Successfully matched {len(top_matches)} PM jobs")
+            return top_matches
             
         except Exception as e:
             self.logger.exception("Failed to match jobs to resume")

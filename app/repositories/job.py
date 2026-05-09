@@ -1,7 +1,8 @@
 """Job repository with job-specific operations."""
 
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from uuid import UUID
+from urllib.parse import urlparse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_, desc, asc
 from sqlalchemy.sql import func
@@ -203,6 +204,59 @@ class JobRepository(BaseRepository[Job]):
             await self.session.rollback()
             logger.error(f"Failed to update job match score: {e}")
             return None
+    
+    async def update_ai_scores(self, job_id: UUID, scores: Dict[str, float], relevance_reason: str) -> Optional[Job]:
+        """Update AI matching scores for a job."""
+        try:
+            db_obj = await self.get_by_id(job_id)
+            if db_obj:
+                db_obj.semantic_score = scores.get("semantic")
+                db_obj.final_score = scores.get("final")
+                db_obj.salary_score = scores.get("salary")
+                db_obj.transition_score = scores.get("transition")
+                db_obj.relevance_reason = relevance_reason
+                await self.session.commit()
+                await self.session.refresh(db_obj)
+                logger.info(f"Updated AI scores for job {job_id}")
+            return db_obj
+        except Exception as e:
+            await self.session.rollback()
+            logger.error(f"Failed to update AI scores: {e}")
+            return None
+    
+    def validate_job_url(self, job_url: str) -> bool:
+        """Validate job URL format and accessibility."""
+        if not job_url:
+            return False
+        
+        try:
+            parsed = urlparse(job_url)
+            
+            # Check basic URL structure
+            if not parsed.scheme or not parsed.netloc:
+                return False
+            
+            # Reject fake/placeholder URLs
+            fake_indicators = [
+                "example.com",
+                "test.com",
+                "localhost",
+                "127.0.0.1",
+                "jobs/tpm-2",
+                "jobs/apm-1"
+            ]
+            
+            if any(indicator in job_url.lower() for indicator in fake_indicators):
+                return False
+            
+            # Must be HTTPS
+            if parsed.scheme != "https":
+                return False
+            
+            return True
+            
+        except Exception:
+            return False
     
     async def get_by_job_url(self, job_url: str) -> Optional[Job]:
         """Get job by URL (for duplicate detection)."""

@@ -47,49 +47,42 @@ class BaseRepository(Generic[ModelType]):
             return None
     
     async def get_all(
-        self, 
-        limit: int = 100, 
-        offset: int = 0,
-        filters: Optional[Dict[str, Any]] = None
+    self,
+    limit: int = 100,
+    offset: int = 0,
+    filters: Optional[Dict[str, Any]] = None
     ) -> List[ModelType]:
         """Get all records with optional filtering."""
+
         try:
+
             query = select(self.model)
-            
-            # Apply filters
+
             if filters:
+
                 for key, value in filters.items():
+
                     if hasattr(self.model, key):
-                        query = query.where(getattr(self.model, key) == value)
-            
+
+                        query = query.where(
+                            getattr(self.model, key) == value
+                        )
+
             query = query.offset(offset).limit(limit)
+
             result = await self.session.execute(query)
-            return result.scalars().all()
+
+            records = result.scalars().all()
+
+            return list(records)
+
         except Exception as e:
-            logger.error(f"Failed to get all {self.model.__name__}: {e}")
+
+            logger.error(
+                f"Failed to get all {self.model.__name__}: {e}"
+            )
+
             return []
-    
-    async def update(self, id: UUID, obj_data: Dict[str, Any]) -> Optional[ModelType]:
-        """Update a record by ID."""
-        try:
-            # Get the existing record
-            db_obj = await self.get_by_id(id)
-            if not db_obj:
-                return None
-            
-            # Update fields
-            for field, value in obj_data.items():
-                if hasattr(db_obj, field):
-                    setattr(db_obj, field, value)
-            
-            await self.session.commit()
-            await self.session.refresh(db_obj)
-            logger.info(f"Updated {self.model.__name__}: {id}")
-            return db_obj
-        except Exception as e:
-            await self.session.rollback()
-            logger.error(f"Failed to update {self.model.__name__}: {e}")
-            return None
     
     async def delete(self, id: UUID) -> bool:
         """Delete a record by ID."""

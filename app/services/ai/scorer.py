@@ -1,4 +1,4 @@
-"""Scoring engine for comprehensive job evaluation."""
+"""Comprehensive scoring engine for job-resume matching."""
 
 import asyncio
 import numpy as np
@@ -6,6 +6,8 @@ from typing import Dict, Any, Optional, List
 from dataclasses import dataclass
 
 from app.core.logging import logger
+from .title_filters import is_pm_role, is_reject_role
+from .seniority import SeniorityDetector, SeniorityLevel
 
 
 @dataclass
@@ -31,6 +33,22 @@ class ScoringEngine:
     
     def __init__(self):
         self.logger = logger.bind(service="scorer")
+        self.minimum_quality_score = 40.0
+        self.seniority_detector = SeniorityDetector()
+        
+        # Rebalanced scoring weights for transition awareness
+        self.semantic_weight = 0.2      # Reduced from 0.3
+        self.pm_role_weight = 0.2      # Reduced from 0.25
+        self.qa_to_pm_weight = 0.15
+        self.api_weight = 0.1
+        self.ai_tech_weight = 0.1
+        self.seniority_weight = 0.15   # New weight for seniority penalties
+        self.experience_weight = 0.1     # New weight for experience fit
+        self.transition_weight = 0.1     # New weight for transition friendliness
+        self.startup_weight = 0.05      # New weight for startup friendliness
+        self.salary_weight = 0.03      # Reduced from 0.05
+        self.recency_weight = 0.02     # Reduced from 0.03
+        self.location_weight = 0.02     # Reduced from 0.02
         
     async def score_job(
         self,
@@ -78,24 +96,23 @@ class ScoringEngine:
             # 8. Location Preference Score (5%)
             scores["location"] = self._score_location_preference(job_data, resume_profile)
             
-            # Calculate final score
-            final_score = sum(scores.values())
-            
-            # Generate relevance reason
-            relevance_reason = self._generate_relevance_reason(scores, job_data, resume_profile)
+            # Apply quality threshold
+            if final_score < self.minimum_quality_score:
+                self.logger.info(f"Job score {final_score} below threshold {self.minimum_quality_score}")
+                return None
             
             return JobScore(
                 job_id=str(job_data.id),
                 title=job_data.title,
                 company=job_data.company,
-                semantic_score=scores["semantic"],
-                pm_role_score=scores["pm_role"],
-                qa_to_pm_score=scores["qa_to_pm"],
-                api_platform_score=scores["api_platform"],
-                ai_technical_score=scores["ai_technical"],
-                salary_score=scores["salary"],
-                recency_score=scores["recency"],
-                location_score=scores["location"],
+                semantic_score=0.0,
+                pm_role_score=pm_role_score,
+                qa_to_pm_score=qa_to_pm_score,
+                api_platform_score=api_score,
+                ai_technical_score=ai_tech_score,
+                salary_score=salary_score,
+                recency_score=recency_score,
+                location_score=location_score,
                 final_score=final_score,
                 relevance_reason=relevance_reason
             )
@@ -124,32 +141,61 @@ class ScoringEngine:
             return similarity_score * 0.25
     
     def _score_pm_role_relevance(self, job_data, resume_profile: Dict[str, Any]) -> float:
-        """Score PM role relevance."""
+        """Score PM role relevance with penalties and bonuses."""
         job_title = job_data.title.lower()
         job_description = job_data.jd_text.lower()
         
-        # Target roles from resume
-        target_roles = resume_profile.get("target_roles", [])
+        # Base score
+        base_score = 0
         
-        # PM keyword matching
-        pm_keywords = ["product manager", "program manager", "project manager", "pm", "product owner"]
-        keyword_matches = sum(1 for keyword in pm_keywords if keyword in job_title or keyword in job_description)
-        keyword_score = min(keyword_matches * 4, 20)
+        # PM keyword matching (stronger weighting)
+        pm_keywords = ["product manager", "technical product manager", "ai product manager", "platform product manager", "apm", "product owner"]
+        keyword_matches = sum(1 for keyword in pm_keywords if keyword in job_title)
+        keyword_score = min(keyword_matches * 6, 24)
+        base_score += keyword_score
         
-        # Role level matching
-        seniority_keywords = ["senior", "lead", "principal", "director", "vp"]
-        role_level_score = 0
-        for keyword in seniority_keywords:
-            if keyword in job_title:
-                role_level_score += 5
+        # Role level bonuses
+        role_level_bonus = 0
+        if "senior" in job_title or "lead" in job_title:
+            role_level_bonus += 6  # Seniority bonus
+        elif "principal" in job_title or "director" in job_title:
+            role_level_bonus += 8  # Leadership bonus
+        elif "associate" in job_title or "junior" in job_title:
+            role_level_bonus += 2  # Entry-level penalty
+        base_score += role_level_bonus
         
         # Target role alignment
+        target_roles = resume_profile.get("target_roles", [])
         role_alignment_score = 0
         for target_role in target_roles:
             if target_role.lower() in job_title:
-                role_alignment_score += 8
+                role_alignment_score += 10  # Strong alignment bonus
+        base_score += role_alignment_score
         
-        return min(keyword_score + role_level_score + role_alignment_score, 20)
+        # Non-PM penalty
+        if not is_pm_role(job_data.title):
+            base_score = max(base_score - 15, 0)  # Heavy penalty for non-PM roles
+        
+        # Reject role penalty
+        if is_reject_role(job_data.title):
+            base_score = 0  # Complete rejection
+        
+        # API/Platform PM bonus
+        api_pm_keywords = ["api product manager", "platform product manager", "technical product manager"]
+        if any(keyword in job_title for keyword in api_pm_keywords):
+            base_score += 8  # API/Platform PM boost
+        
+        # AI PM bonus
+        ai_pm_keywords = ["ai product manager", "machine learning product manager", "data product manager"]
+        if any(keyword in job_title for keyword in ai_pm_keywords):
+            base_score += 10  # AI PM boost
+        
+        # Startup PM bonus
+        startup_keywords = ["startup", "early stage", "venture", "seed", "series a"]
+        if any(keyword in job_description.lower() for keyword in startup_keywords):
+            base_score += 6  # Startup PM boost
+        
+        return min(base_score, 30)  # Cap at 30 instead of 20
     
     def _score_qa_to_pm_transition(self, job_data, resume_profile: Dict[str, Any]) -> float:
         """Score QA-to-PM transition fit."""
@@ -272,29 +318,93 @@ class ScoringEngine:
         else:
             return 1.0
     
-    def _generate_relevance_reason(self, scores: Dict[str, float], job_data, resume_profile: Dict[str, Any]) -> str:
-        """Generate human-readable relevance reason."""
+    def _generate_enhanced_relevance_reason(
+        self,
+        seniority_analysis: Dict[str, Any],
+        pm_role_score: float,
+        qa_to_pm_score: float,
+        api_score: float,
+        ai_tech_score: float,
+        final_score: float
+    ) -> str:
+        """Generate enhanced relevance reason with transition awareness."""
+        
         reasons = []
         
-        # High scoring factors
-        if scores["semantic"] >= 20:
-            reasons.append("Strong semantic match")
-        if scores["pm_role"] >= 15:
-            reasons.append("PM role alignment")
-        if scores["salary"] >= 8:
-            reasons.append("Competitive salary")
-        if scores["location"] >= 4:
-            reasons.append("Preferred location")
+        # Add seniority-aware reasons
+        if seniority_analysis["transition_friendly"]:
+            reasons.append("PM transition friendly")
+        else:
+            if seniority_analysis["seniority_level"] in ["principal", "director", "executive"]:
+                reasons.append("Too senior for transition")
         
-        # Special cases
-        job_title = job_data.title.lower()
-        if "senior" in job_title and scores["pm_role"] >= 15:
-            reasons.append("Senior PM position")
+        # Add experience fit reasons
+        if seniority_analysis["experience_fit_score"] > 5:
+            reasons.append("Good experience fit")
+        elif seniority_analysis["experience_fit_score"] < -5:
+            reasons.append("Experience mismatch")
         
-        if scores["ai_technical"] >= 12:
-            reasons.append("AI/technical PM role")
+        # Add transition friendliness reasons
+        if seniority_analysis["transition_friendliness_score"] > 5:
+            reasons.append("Technical PM alignment")
+        elif seniority_analysis["startup_friendliness_score"] > 3:
+            reasons.append("Startup-friendly environment")
         
-        if not reasons:
-            return "Moderate match"
+        # Add traditional scoring reasons
+        if pm_role_score > 4:
+            reasons.append("Strong PM role alignment")
+        elif pm_role_score > 2:
+            reasons.append("Good PM role fit")
         
-        return ", ".join(reasons)
+        if qa_to_pm_score > 3:
+            reasons.append("QA->PM transition friendly")
+        
+        if api_score > 3:
+            reasons.append("API/platform experience")
+        
+        if ai_tech_score > 3:
+            reasons.append("AI/technical background")
+        
+        if final_score > 15:
+            reasons.append("High overall match")
+        elif final_score > 10:
+            reasons.append("Moderate match")
+        else:
+            reasons.append("Basic match")
+        
+        return "; ".join(reasons)
+    
+    def _generate_relevance_reason(
+        self,
+        pm_role_score: float,
+        qa_to_pm_score: float,
+        api_score: float,
+        ai_tech_score: float,
+        final_score: float
+    ) -> str:
+        """Generate relevance reason based on scoring components."""
+        
+        reasons = []
+        
+        if pm_role_score > 4:
+            reasons.append("Strong PM role alignment")
+        elif pm_role_score > 2:
+            reasons.append("Good PM role fit")
+        
+        if qa_to_pm_score > 3:
+            reasons.append("QA->PM transition friendly")
+        
+        if api_score > 3:
+            reasons.append("API/platform experience")
+        
+        if ai_tech_score > 3:
+            reasons.append("AI/technical background")
+        
+        if final_score > 15:
+            reasons.append("High overall match")
+        elif final_score > 10:
+            reasons.append("Moderate match")
+        else:
+            reasons.append("Basic match")
+        
+        return "; ".join(reasons)

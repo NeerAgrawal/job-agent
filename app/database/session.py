@@ -2,17 +2,41 @@
 
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
-from sqlalchemy.ext.asyncio import AsyncSession
+
+from sqlalchemy.ext.asyncio import (
+    AsyncSession,
+    async_sessionmaker,
+)
 
 from app.database.engine import engine
 
 
+# Proper async session factory
+SessionLocal = async_sessionmaker(
+    bind=engine,
+    class_=AsyncSession,
+    expire_on_commit=False,
+)
+
+
 @asynccontextmanager
 async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
-    """Get database session with proper context management."""
-    async with AsyncSession(engine) as session:
+    """Get database session with proper async context management."""
+
+    async with SessionLocal() as session:
+
         try:
+
             yield session
-        except Exception as e:
+
+            await session.commit()
+
+        except Exception:
+
             await session.rollback()
-            raise e
+
+            raise
+
+        finally:
+
+            await session.close()

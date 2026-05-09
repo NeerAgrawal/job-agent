@@ -11,7 +11,7 @@ engine = create_async_engine(
     database_url,
     poolclass=StaticPool,
     connect_args={"check_same_thread": False} if "sqlite" in database_url else {},
-    echo=settings.debug,
+    echo=False,
 )
 
 # Metadata for migrations

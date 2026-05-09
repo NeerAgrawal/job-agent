@@ -10,6 +10,7 @@ import httpx
 from app.services.fetchers.base import BaseFetcher
 from app.schemas.job import JobCreate
 from app.core.logging import logger
+from app.services.ai.title_filters import is_pm_role, is_reject_role
 
 
 class LeverFetcher(BaseFetcher):
@@ -63,19 +64,7 @@ class LeverFetcher(BaseFetcher):
     async def _get_all_postings(self) -> List[Dict[str, Any]]:
         """Fetch postings from multiple Lever companies."""
 
-        companies = [
-            "airbnb",
-            "spotify",
-            "uber",
-            "lyft",
-            "coinbase",
-            "stripe",
-            "figma",
-            "notion",
-            "segment",
-            "carta",
-            "robinhood"
-        ]
+        companies = ["spotify"]
 
         all_postings = []
 
@@ -147,12 +136,25 @@ class LeverFetcher(BaseFetcher):
         jobs: List[JobCreate],
         filters: Optional[Dict[str, Any]]
     ) -> List[JobCreate]:
-        """Apply optional filters."""
+        """Apply optional filters with PM-only filtering."""
 
         if not filters:
-            return jobs
+            # Apply PM-only filtering by default
+            filtered_jobs = []
+            for job in jobs:
+                if is_pm_role(job.title) and not is_reject_role(job.title):
+                    filtered_jobs.append(job)
+            return filtered_jobs
 
         filtered_jobs = jobs
+        
+        # Apply PM-only filtering first
+        pm_filtered_jobs = []
+        for job in filtered_jobs:
+            if is_pm_role(job.title) and not is_reject_role(job.title):
+                pm_filtered_jobs.append(job)
+        
+        filtered_jobs = pm_filtered_jobs
 
         if filters.get("search"):
             search_term = filters["search"].lower()

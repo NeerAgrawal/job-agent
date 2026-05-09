@@ -148,30 +148,52 @@ async def test_ai_matching():
         
         # Score top matches
         scored_jobs = []
-        for i, match in enumerate(matches[:5]):
-            # Find the corresponding Job object
-            job_obj = next((job for job in jobs if job.title == match.job_title and job.company == match.company), None)
+        async with get_db_session() as session:
+            job_repo = JobRepository(session)
             
-            if job_obj:
-                score = await scorer.score_job(
-                    job_obj,
-                    resume_data,
-                    match.similarity_score
-                )
+            for i, match in enumerate(matches[:5]):
+                # Find the corresponding Job object
+                job_obj = next((job for job in jobs if job.title == match.job_title and job.company == match.company), None)
                 
-                scored_jobs.append((match, score))
-                
-                print(f"   Job {i+1}: {match.job_title} at {match.company}")
-                print(f"      Semantic: {score.semantic_score:.1f}")
-                print(f"      PM Role: {score.pm_role_score:.1f}")
-                print(f"      QA->PM: {score.qa_to_pm_score:.1f}")
-                print(f"      API: {score.api_platform_score:.1f}")
-                print(f"      AI/Tech: {score.ai_technical_score:.1f}")
-                print(f"      Salary: {score.salary_score:.1f}")
-                print(f"      Recency: {score.recency_score:.1f}")
-                print(f"      Location: {score.location_score:.1f}")
-                print(f"      Final: {score.final_score:.1f}")
-                print(f"      Reason: {score.relevance_reason}")
+                if job_obj:
+                    score = await scorer.score_job(
+                        job_obj,
+                        resume_data,
+                        match.similarity_score
+                    )
+                    
+                    if score:  # Only process if score meets quality threshold
+                        # Persist scores to database
+                        scores_dict = {
+                            "semantic": score.semantic_score,
+                            "final": score.final_score,
+                            "salary": score.salary_score,
+                            "transition": score.qa_to_pm_score
+                        }
+                        
+                        await job_repo.update_ai_scores(
+                            job_obj.id,
+                            scores_dict,
+                            score.relevance_reason
+                        )
+                        
+                        scored_jobs.append((match, score))
+                        
+                        print(f"   Job {i+1}: {match.job_title} at {match.company}")
+                        print(f"      Semantic: {score.semantic_score:.1f}")
+                        print(f"      PM Role: {score.pm_role_score:.1f}")
+                        print(f"      QA->PM: {score.qa_to_pm_score:.1f}")
+                        print(f"      API: {score.api_platform_score:.1f}")
+                        print(f"      AI/Tech: {score.ai_technical_score:.1f}")
+                        print(f"      Salary: {score.salary_score:.1f}")
+                        print(f"      Recency: {score.recency_score:.1f}")
+                        print(f"      Location: {score.location_score:.1f}")
+                        print(f"      Final: {score.final_score:.1f}")
+                        print(f"      Reason: {score.relevance_reason}")
+                        print(f"      ✅ Scores persisted to database")
+                    else:
+                        print(f"   Job {i+1}: {match.job_title} at {match.company}")
+                        print(f"      ❌ Score below quality threshold ({scorer.minimum_quality_score})")
         
         # Test 7: Results summary
         print("\n📈 Results Summary:")

@@ -195,3 +195,17 @@ Thumbs.db
 
 # Node modules (if any)
 node_modules/
+
+# Python compiled files
+*.pyc
+exports/
+
+# Database files
+*.db
+*.db-wal
+*.db-shm
+
+# Debug files
+cutshort_debug.html
+naukri_debug.html
+instahyre_auth.json

@@ -7,6 +7,7 @@ from datetime import datetime
 from app.services.fetchers.greenhouse import GreenhouseFetcher
 from app.services.fetchers.lever import LeverFetcher
 from app.services.fetchers.wellfound import WellfoundFetcher
+from app.services.fetchers.india import InstahyreFetcher, CutshortFetcher, NaukriFetcher
 
 from app.repositories.job import JobRepository
 from app.database.session import get_db_session
@@ -30,7 +31,10 @@ class FetcherOrchestrator:
                 ]
             ),
             "lever": LeverFetcher(),
-            "wellfound": WellfoundFetcher()
+            "wellfound": WellfoundFetcher(),
+            "instahyre": InstahyreFetcher(),
+            "cutshort": CutshortFetcher(),
+            "naukri": NaukriFetcher()
         }
 
         # bounded concurrency
@@ -95,19 +99,31 @@ class FetcherOrchestrator:
 
             summary = {
                 "timestamp": datetime.utcnow().isoformat(),
+
                 "total_sources": len(self.fetchers),
+
                 "successful_sources": len([
                     r for r in fetch_results.values()
                     if r["success"]
                 ]),
+
                 "failed_sources": len([
                     r for r in fetch_results.values()
                     if not r["success"]
                 ]),
+
                 "total_jobs_fetched": len(all_jobs),
+
                 "jobs_after_filtering": len(filtered_jobs),
+
                 "unique_jobs": len(unique_jobs),
+
+                # IMPORTANT FIX
+                "saved_count": saved_count,
+
+                # keep old key for backward compatibility
                 "jobs_saved": saved_count,
+
                 "source_results": fetch_results
             }
 
@@ -152,6 +168,25 @@ class FetcherOrchestrator:
                     ),
                     timeout=60
                 )
+
+                # Strict PM role filtering
+                filtered_jobs = []
+
+                for job in jobs:
+
+                    title = getattr(job, "title", "")
+
+                    if fetcher.is_pm_role(title):
+
+                        filtered_jobs.append(job)
+
+                    else:
+
+                        self.logger.info(
+                            f"Rejected non-PM role: {title}"
+                        )
+
+                jobs = filtered_jobs
 
                 self.logger.info(
                     f"Fetch success source={source_name} "
@@ -335,39 +370,37 @@ class FetcherOrchestrator:
             return 0
 
         saved_count = 0
+        jobs_failed = 0
 
         async with get_db_session() as session:
 
             repo = JobRepository(session)
 
-            for job in jobs:
+            for job_data in jobs:
 
                 try:
                     existing_job = await repo.get_by_job_url(
-                        job.job_url
+                        job_data.job_url
                     )
-
                     if existing_job:
-                        self.logger.debug(
-                            f"Duplicate skipped "
-                            f"url={job.job_url}"
-                        )
                         continue
-
-                    await repo.create(
-                        job.model_dump()
-                    )
-
+                    
+                    # Validate URL before saving
+                    job_url = job_data.job_url
+                    if not repo.validate_job_url(job_url):
+                        self.logger.warning(f"Rejected invalid URL: {job_url}")
+                        jobs_failed += 1
+                        continue
+                    
+                    await repo.create(job_data.model_dump())
                     saved_count += 1
-
-                except Exception:
-                    self.logger.exception(
-                        f"Failed saving job "
-                        f"title={job.title}"
-                    )
+                    self.logger.info(f"Saved job: {job_data.title}")
+                except Exception as e:
+                    jobs_failed += 1
+                    self.logger.exception(f"Failed to save job: {e}")
 
         self.logger.info(
-            f"Saved jobs count={saved_count}"
+            f"Saved jobs count={saved_count}, failed={jobs_failed}"
         )
 
         return saved_count
