@@ -94,6 +94,9 @@ class DigestFormatter:
             source_emoji = self._get_source_emoji(source)
             source_quality = self._get_source_quality_indicator(score, source)
             
+            # Get browser extraction indicator
+            browser_indicator = self._get_browser_indicator(job)
+            
             # Direct URL
             job_section = ""
             job_url = job.get('job_url', '')
@@ -108,6 +111,7 @@ class DigestFormatter:
                 f"💰 {salary}\n"
                 f"🏠 {remote_status}\n"
                 f"{source_emoji} {source_quality}\n"
+                f"{browser_indicator}\n"
                 f"🔗 [Apply]({job_url})\n"
             )
             
@@ -149,6 +153,33 @@ class DigestFormatter:
             digest += "🎯 None met quality threshold\n"
         
         return digest
+    
+    def _get_source_quality_indicator(self, score: float, source: str) -> str:
+        """Get quality indicator for source."""
+        if score >= 70:
+            return "🔥 High Quality"
+        elif score >= 50:
+            return "✅ Good Quality"
+        elif score >= 30:
+            return "⚠️ Fair Quality"
+        else:
+            return "❌ Low Quality"
+    
+    def _get_browser_indicator(self, job: Dict[str, Any]) -> str:
+        """Get browser extraction indicator for job."""
+        # Check if job was extracted via browser
+        raw_metadata = job.get('raw_metadata', {})
+        extraction_method = raw_metadata.get('extraction_method', '')
+        source = job.get('source', '')
+        
+        if extraction_method == 'browser' or source.endswith('_browser'):
+            return "🌐 Browser Extracted"
+        elif 'authenticated' in raw_metadata:
+            return "🔐 Authenticated Source"
+        elif 'js_rendered' in raw_metadata:
+            return "⚡ High Confidence Match"
+        else:
+            return "📡 API Extracted"
     
     def _truncate_text(self, text: str, max_length: int) -> str:
         """Truncate text to maximum length."""
