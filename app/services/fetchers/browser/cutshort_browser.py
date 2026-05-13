@@ -156,7 +156,12 @@ class CutshortBrowserFetcher(BaseBrowserFetcher):
                 '.company',
                 '.company-name',
                 '[data-field="company"]',
-                'span[class*="company"]'
+                'span[class*="company"]',
+                'div[class*="company"]',
+                'h3[class*="company"]',
+                'p[class*="company"]',
+                '[data-company]',
+                'a[class*="company"]'
             ]
             
             company = ""

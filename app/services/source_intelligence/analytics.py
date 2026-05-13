@@ -37,12 +37,29 @@ class SourceAnalytics:
     def _generate_summary(self, source_data: Dict[str, Any]) -> Dict[str, Any]:
         """Generate executive summary."""
         total_sources = len(source_data)
+        
+        # Handle empty source data
+        if total_sources == 0:
+            return {
+                'total_sources': 0,
+                'total_fetched': 0,
+                'total_pm_accepted': 0,
+                'total_pm_rejected': 0,
+                'avg_pm_density': 0,
+                'avg_quality_score': 0,
+                'pm_density_distribution': {},
+                'quality_distribution': {},
+                'performance_breakdown': {},
+                'key_insights': ['No source data available for analysis'],
+                'recommendations': ['Check source configurations and network connectivity']
+            }
+        
         total_fetched = sum(data.get('total_fetched', 0) for data in source_data.values())
         total_pm_accepted = sum(data.get('pm_accepted', 0) for data in source_data.values())
         total_pm_rejected = sum(data.get('pm_rejected', 0) for data in source_data.values())
         
         # Calculate averages
-        avg_pm_density = sum(float(data.get('pm_density', '0').replace('%', '')) for data in source_data.values()) / total_sources if total_sources > 0 else 0
+        avg_pm_density = sum(float(data.get('pm_density', '0').replace('%', '') or '0') for data in source_data.values()) / total_sources if total_sources > 0 else 0
         avg_quality_score = sum(float(data.get('quality_score', '0')) for data in source_data.values()) / total_sources if total_sources > 0 else 0
         
         return {
@@ -61,9 +78,11 @@ class SourceAnalytics:
         analysis = {}
         
         for source_name, data in source_data.items():
-            pm_density = float(data.get('pm_density', '0').replace('%', ''))
+            pm_density_str = data.get('pm_density', '0').replace('%', '')
+            pm_density = float(pm_density_str) if pm_density_str else 0
             quality_score = float(data.get('quality_score', '0'))
-            acceptance_rate = float(data.get('acceptance_rate', '0').replace('%', ''))
+            acceptance_rate_str = data.get('acceptance_rate', '0').replace('%', '')
+            acceptance_rate = float(acceptance_rate_str) if acceptance_rate_str else 0
             
             # Categorize source performance
             performance_tier = self._get_performance_tier(quality_score, pm_density)
@@ -82,10 +101,14 @@ class SourceAnalytics:
         """Generate actionable recommendations."""
         recommendations = []
         
-        # Analyze overall patterns
+        # Handle empty source data
+        if not source_data:
+            return ['No source data available for recommendations']
+        
+        # Identify low-density sources
         low_density_sources = [
             name for name, data in source_data.items()
-            if float(data.get('pm_density', '0').replace('%', '')) < 2
+            if float(data.get('pm_density', '0').replace('%', '') or '0') < 2
         ]
         
         low_quality_sources = [
@@ -95,7 +118,7 @@ class SourceAnalytics:
         
         high_rejection_sources = [
             name for name, data in source_data.items()
-            if float(data.get('acceptance_rate', '0').replace('%', '')) < 10
+            if float(data.get('acceptance_rate', '0').replace('%', '') or '0') < 10
         ]
         
         # Generate specific recommendations
@@ -125,6 +148,16 @@ class SourceAnalytics:
     
     def _analyze_trends(self, source_data: Dict[str, Any]) -> Dict[str, Any]:
         """Analyze trends and patterns."""
+        # Handle empty source data
+        if not source_data:
+            return {
+                'best_performers': [],
+                'worst_performers': [],
+                'density_distribution': {},
+                'quality_distribution': {},
+                'key_insights': ['No source data available for trend analysis']
+            }
+        
         trends = {
             'best_performers': [],
             'worst_performers': [],
@@ -164,7 +197,7 @@ class SourceAnalytics:
         quality_ranges = {'Poor': 0, 'Fair': 0, 'Good': 0, 'Excellent': 0}
         
         for data in source_data.values():
-            density = float(data.get('pm_density', '0').replace('%', ''))
+            density = float(data.get('pm_density', '0').replace('%', '') or '0')
             quality = float(data.get('quality_score', 0))
             
             # Density distribution
@@ -190,12 +223,12 @@ class SourceAnalytics:
         
         return trends
     
-    def _calculate_efficiency(self, pm_accepted: int, total_fetched: int) -> str:
-        """Calculate overall fetch efficiency."""
-        if total_fetched == 0:
+    def _calculate_efficiency(self, total_fetched: int, pm_accepted: int) -> str:
+        """Calculate fetch efficiency."""
+        if not total_fetched or total_fetched == 0:
             return "No data"
         
-        efficiency = (pm_accepted / total_fetched) * 100
+        efficiency = (pm_accepted / total_fetched) * 100 if total_fetched > 0 else 0
         
         if efficiency >= 50:
             return "Excellent"

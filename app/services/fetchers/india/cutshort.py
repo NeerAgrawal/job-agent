@@ -89,9 +89,34 @@ class CutshortFetcher(BaseIndiaFetcher):
 
             jobs = []
 
-            job_elements = soup.select(
-                "div[data-jobid], article, div.job-card"
-            )
+            # Try multiple selector patterns for Cutshort job listings
+            selectors = [
+                "div[data-jobid]",
+                "article.job-card", 
+                "div.job-card",
+                "div.job-tile",
+                "div[data-testid*='job']",
+                "div[class*='job']",
+                "li.job-item",
+                "div.job-listing",
+                "div[data-job-id]",
+                "div[class*='JobCard']",
+                "div[class*='JobTile']"
+            ]
+            
+            job_elements = []
+            for selector in selectors:
+                elements = soup.select(selector)
+                if elements:
+                    job_elements = elements
+                    self.logger.info(f"Found {len(elements)} elements with selector: {selector}")
+                    break
+            
+            if not job_elements:
+                # Fallback: look for any divs with job-related content
+                all_divs = soup.find_all('div')
+                job_elements = [div for div in all_divs if any(keyword in div.get_text().lower() for keyword in ['product manager', 'pm', 'manager', 'engineer', 'developer', 'salary', 'experience', 'location'])][:50]
+                self.logger.info(f"Fallback: Found {len(job_elements)} potential job elements")
 
             self.logger.info(
                 f"Found {len(job_elements)} "

@@ -314,7 +314,7 @@ class BrowserUtils:
             return selectors[0]
         return fallback or "div"
     
-    def wait_for_content(self, page, timeout: int = 10000) -> bool:
+    async def wait_for_content(self, page, timeout: int = 10000) -> bool:
         """Wait for page content to load."""
         try:
             # Wait for any content to appear
@@ -328,7 +328,7 @@ class BrowserUtils:
             
             for selector in content_selectors:
                 try:
-                    element = page.wait_for_selector(selector, timeout=2000)
+                    element = await page.wait_for_selector(selector, timeout=2000)
                     if element:
                         return True
                 except:

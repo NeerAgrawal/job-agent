@@ -74,22 +74,32 @@ class PMRolePreFilter:
         
         accepted = []
         rejected = []
+        uncertain = []
         rejection_reasons = {}
         
         for job in jobs:
-            title = job.get('title', '').lower().strip()
+            # Handle both dict and Pydantic model objects
+            if hasattr(job, 'title'):
+                title = job.title.lower().strip()
+            else:
+                title = job.get('title', '').lower().strip()
             
             # Clean title for better matching
             cleaned_title = self._clean_title(title)
             
-            # Early rejection check
+            # Early rejection
             should_reject, reason = self._should_early_reject(cleaned_title)
-            
             if should_reject:
                 rejected.append(job)
-                rejection_reasons[reason] = rejection_reasons.get(reason, 0) + 1
-            else:
+                continue
+            
+            # Early acceptance
+            if self._should_accept(cleaned_title):
                 accepted.append(job)
+                continue
+            
+            # Uncertain - keep for AI scoring
+            uncertain.append(job)
         
         # Calculate statistics
         total = len(jobs)
@@ -135,7 +145,7 @@ class PMRolePreFilter:
         
         # Remove noise words (keep PM variations)
         for word in noise_words:
-            if word not in ['pm', 'product manager', 'associate product manager']:
+            if word not in ['pm', 'product manager', 'associate product manager', 'manager']:
                 cleaned = cleaned.replace(f" {word} ", " ").replace(f" {word}", "")
         
         # Normalize spacing
@@ -179,6 +189,21 @@ class PMRolePreFilter:
             return True, "non_pm_contractor"
         
         return False, ""
+    
+    def _should_accept(self, title: str) -> bool:
+        """Determine if job should be early accepted."""
+        if not title:
+            return False
+        
+        # Normalize title for case-insensitive matching
+        title_lower = title.lower()
+        
+        # Check for early accept roles
+        for accept_role in self.early_accept_roles:
+            if accept_role in title_lower:
+                return True
+        
+        return False
     
     def get_rejection_summary(self, stats: Dict[str, Any]) -> str:
         """Get human-readable rejection summary."""

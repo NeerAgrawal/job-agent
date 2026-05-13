@@ -118,9 +118,6 @@ class DigestFormatter:
             job_parts.append(job_part)
         
         return "\n".join(job_parts)
-            jobs_section += job_section
-        
-        return jobs_section
     
     def _format_summary(self, summary_stats: Dict[str, Any]) -> str:
         """Format summary section."""

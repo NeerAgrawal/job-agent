@@ -136,11 +136,7 @@ class FetcherOrchestrator:
                 "timestamp": datetime.utcnow().isoformat(),
                 "total_sources": len(self.fetchers),
                 "successful_sources": len([
-                    r["source"] for r in fetch_results.values()
-                    if r["success"]
-                ]),
-                "successful_sources": len([
-                    r["source"] for r in fetch_results.values()
+                    source_name for source_name, r in fetch_results.items()
                     if r["success"]
                 ]),
                 "total_jobs_fetched": len(all_jobs),
@@ -158,6 +154,16 @@ class FetcherOrchestrator:
             )
 
             return summary
+
+        except Exception:
+            self.logger.exception(
+                "Orchestrated fetch failed"
+            )
+
+            return {
+                "success": False,
+                "error": "orchestrator_failure"
+            }
     
     def _generate_intelligence_summary(self) -> Dict[str, Any]:
         """Generate source intelligence summary with browser metrics."""
@@ -206,16 +212,6 @@ class FetcherOrchestrator:
                 'recommendations': ['Failed to generate intelligence summary'],
                 'browser_available': BROWSER_FETCHERS_AVAILABLE,
                 'generated_at': datetime.utcnow().isoformat()
-            }
-
-        except Exception:
-            self.logger.exception(
-                "Orchestrated fetch failed"
-            )
-
-            return {
-                "success": False,
-                "error": "orchestrator_failure"
             }
 
     async def _safe_fetch(
@@ -540,11 +536,20 @@ class FetcherOrchestrator:
         unique_jobs = []
 
         for job in jobs:
+            # Handle both dict and Pydantic model objects
+            if hasattr(job, 'title'):
+                title = job.title.lower()
+                company = job.company.lower()
+                job_url = job.job_url
+            else:
+                title = job.get('title', '').lower()
+                company = job.get('company', '').lower()
+                job_url = job.get('job_url', '')
 
             identifier = (
-                job.title.lower(),
-                job.company.lower(),
-                job.job_url
+                title,
+                company,
+                job_url
             )
 
             if identifier not in seen:
@@ -575,24 +580,40 @@ class FetcherOrchestrator:
             repo = JobRepository(session)
 
             for job_data in jobs:
+                # Handle both dict and Pydantic model objects
+                if hasattr(job_data, 'job_url'):
+                    job_url = job_data.job_url
+                else:
+                    job_url = job_data.get('job_url', '')
 
                 try:
                     existing_job = await repo.get_by_job_url(
-                        job_data.job_url
+                        job_url
                     )
                     if existing_job:
                         continue
                     
                     # Validate URL before saving
-                    job_url = job_data.job_url
                     if not repo.validate_job_url(job_url):
                         self.logger.warning(f"Rejected invalid URL: {job_url}")
                         jobs_failed += 1
                         continue
                     
-                    await repo.create(job_data.model_dump())
+                    # Handle both dict and Pydantic model objects for saving
+                    if hasattr(job_data, 'model_dump'):
+                        job_dict = job_data.model_dump()
+                    else:
+                        job_dict = job_data
+                    
+                    await repo.create(job_dict)
                     saved_count += 1
-                    self.logger.info(f"Saved job: {job_data.title}")
+                    # Handle both dict and Pydantic model objects for logging
+                    if hasattr(job_data, 'title'):
+                        job_title = job_data.title
+                    else:
+                        job_title = job_data.get('title', 'Unknown')
+                    
+                    self.logger.info(f"Saved job: {job_title}")
                 except Exception as e:
                     jobs_failed += 1
                     self.logger.exception(f"Failed to save job: {e}")

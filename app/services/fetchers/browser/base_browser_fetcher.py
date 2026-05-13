@@ -29,10 +29,20 @@ class BaseBrowserFetcher(ABC):
         try:
             self.logger.info(f"Starting browser fetch from {self.name} with limit={limit}")
             
-            # Get Playwright manager
+            # Get Playwright manager and ensure initialization
             playwright_manager = await get_playwright_manager()
+            
+            # Try to initialize if not available
             if not playwright_manager.is_available():
-                self.logger.error("Playwright not available for browser fetch")
+                self.logger.info("Initializing Playwright for browser fetch...")
+                initialized = await playwright_manager.initialize()
+                if not initialized:
+                    self.logger.error("Failed to initialize Playwright for browser fetch")
+                    return []
+            
+            # Double-check availability
+            if not playwright_manager.is_available():
+                self.logger.error("Playwright still not available for browser fetch")
                 return []
             
             # Use context manager for safe page handling

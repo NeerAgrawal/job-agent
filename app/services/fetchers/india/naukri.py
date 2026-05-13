@@ -66,9 +66,36 @@ class NaukriFetcher(BaseIndiaFetcher):
 
             jobs = []
 
-            job_elements = soup.select(
-    "article.jobTuple, div.jobTuple"
-)
+            # Try multiple selector patterns for Naukri job listings
+            selectors = [
+                "article.jobTuple",
+                "div.jobTuple",
+                "div.job-card",
+                "article.job-card",
+                "div.job-tuple",
+                "div[class*='jobTuple']",
+                "div[class*='job-card']",
+                "li.job-item",
+                "div.job-listing",
+                "div[data-job-id]",
+                "article[data-job-id]",
+                "div[class*='JobCard']",
+                "div[class*='JobTuple']"
+            ]
+            
+            job_elements = []
+            for selector in selectors:
+                elements = soup.select(selector)
+                if elements:
+                    job_elements = elements
+                    self.logger.info(f"Found {len(elements)} Naukri elements with selector: {selector}")
+                    break
+            
+            if not job_elements:
+                # Fallback: look for any divs with job-related content
+                all_divs = soup.find_all('div')
+                job_elements = [div for div in all_divs if any(keyword in div.get_text().lower() for keyword in ['product manager', 'pm', 'manager', 'engineer', 'developer', 'salary', 'experience', 'location', 'years'])][:50]
+                self.logger.info(f"Fallback: Found {len(job_elements)} potential Naukri job elements")
 
             for element in job_elements[:limit]:
 

@@ -43,6 +43,17 @@ class Settings(BaseSettings):
     # Telegram Bot (Future)
     telegram_bot_token: Optional[str] = Field(default=None, env="TELEGRAM_BOT_TOKEN")
     telegram_chat_id: Optional[str] = Field(default=None, env="TELEGRAM_CHAT_ID")
+
+    # Instahyre Authentication
+    instahyre_email: Optional[str] = Field(
+        default=None,
+        env="neeragrawal05@gmail.com"
+    )
+
+    instahyre_session_file: str = Field(
+        default="sessions/instahyre_session.json",
+        env="INSTAHYRE_SESSION_FILE"
+    )
     
     # Playwright (Future)
     playwright_headless: bool = Field(default=True, env="PLAYWRIGHT_HEADLESS")

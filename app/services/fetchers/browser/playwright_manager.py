@@ -1,5 +1,6 @@
 """Playwright manager for safe browser lifecycle management."""
 
+import os
 import asyncio
 from typing import Optional, Dict, Any
 from datetime import datetime
@@ -12,6 +13,7 @@ except ImportError:
     PLAYWRIGHT_AVAILABLE = False
 
 from app.core.logging import logger
+from app.core.config.settings import settings
 
 
 class PlaywrightManager:
@@ -42,8 +44,10 @@ class PlaywrightManager:
             self._playwright = await async_playwright().start()
             
             # Launch browser with sensible defaults
+            headless = settings.playwright_headless
+            
             self._browser = await self._playwright.chromium.launch(
-                headless=True,
+                headless=headless,
                 args=[
                     '--no-sandbox',
                     '--disable-dev-shm-usage',

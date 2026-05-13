@@ -7,12 +7,13 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from app.core.logging import logger
+from app.core.config.settings import settings
 
 
 class SessionStore:
     """Persistent session storage for browser authentication."""
     
-    def __init__(self, storage_dir: str = "browser_sessions"):
+    def __init__(self, storage_dir: str = "sessions"):
         self.logger = logger.bind(service="session_store")
         self.storage_dir = Path(storage_dir)
         self.storage_dir.mkdir(exist_ok=True)
@@ -39,6 +40,97 @@ class SessionStore:
             
         except Exception as e:
             self.logger.error(f"Failed to save session for {source_name}: {e}")
+    
+    async def save_instahyre_session(self, storage_state: Dict[str, Any]) -> None:
+        """Save Instahyre-specific session state."""
+        try:
+            # Create sessions directory if it doesn't exist
+            self.storage_dir.mkdir(exist_ok=True)
+            
+            # Save to Instahyre-specific file using settings
+            instahyre_session_file = Path(settings.instahyre_session_file)
+            
+            session_data = {
+                'storage_state': storage_state,
+                'saved_at': datetime.utcnow().isoformat(),
+                'expires_at': (datetime.utcnow() + timedelta(days=self.max_session_age_days)).isoformat(),
+                'source': 'instahyre',
+                'auth_method': 'google_sign_in'
+            }
+            
+            with open(instahyre_session_file, 'w', encoding='utf-8') as f:
+                json.dump(session_data, f, indent=2, ensure_ascii=False)
+            
+            self.logger.info("Instahyre session saved to instahyre_session.json")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to save Instahyre session: {e}")
+    
+    async def get_instahyre_session(self) -> Optional[Dict[str, Any]]:
+        """Get Instahyre-specific session state."""
+        try:
+            instahyre_session_file = Path(settings.instahyre_session_file)
+            
+            if not instahyre_session_file.exists():
+                self.logger.info("No Instahyre session file found")
+                return None
+            
+            with open(instahyre_session_file, 'r', encoding='utf-8') as f:
+                session_data = json.load(f)
+            
+            # Check if session is expired
+            expires_at = datetime.fromisoformat(session_data['expires_at'])
+            if datetime.utcnow() > expires_at:
+                self.logger.info("Instahyre session expired")
+                return None
+            
+            self.logger.info("Instahyre session loaded successfully")
+            return session_data['storage_state']
+            
+        except Exception as e:
+            self.logger.error(f"Failed to load Instahyre session: {e}")
+            return None
+    
+    async def delete_instahyre_session(self) -> None:
+        """Delete Instahyre-specific session."""
+        try:
+            instahyre_session_file = Path(settings.instahyre_session_file)
+            
+            if instahyre_session_file.exists():
+                instahyre_session_file.unlink()
+                self.logger.info("Instahyre session deleted")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to delete Instahyre session: {e}")
+    
+    async def validate_instahyre_session(self, storage_state: Dict[str, Any]) -> bool:
+        """Validate Instahyre session by checking for authentication indicators."""
+        try:
+            # Basic validation - check if session has cookies
+            if not storage_state or 'cookies' not in storage_state:
+                return False
+            
+            cookies = storage_state.get('cookies', [])
+            if not cookies:
+                return False
+            
+            # Check for Google auth cookies
+            google_cookies = [
+                cookie for cookie in cookies
+                if 'google' in cookie.get('name', '').lower() or 
+                   'accounts.google.com' in cookie.get('domain', '').lower()
+            ]
+            
+            if not google_cookies:
+                self.logger.debug("No Google auth cookies found in session")
+                return False
+            
+            # Check session age
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Failed to validate Instahyre session: {e}")
+            return False
     
     async def get_session(self, source_name: str) -> Optional[Dict[str, Any]]:
         """Get saved session state."""

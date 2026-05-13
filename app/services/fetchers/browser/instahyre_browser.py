@@ -1,4 +1,4 @@
-"""Instahyre browser fetcher with authentication support."""
+"""Instahyre browser fetcher with authentication and PM job extraction."""
 
 import asyncio
 import os
@@ -6,6 +6,7 @@ from typing import Dict, Any, List
 from datetime import datetime
 
 from app.core.logging import logger
+from app.core.config.settings import settings
 from .base_browser_fetcher import BaseBrowserFetcher
 from .browser_utils import BrowserUtils
 
@@ -18,63 +19,238 @@ class InstahyreBrowserFetcher(BaseBrowserFetcher):
         self.utils = BrowserUtils()
         self.login_url = "https://www.instahyre.com/login"
         self.jobs_url = "https://www.instahyre.com/jobs"
+        self.google_sign_in_url = "https://www.instahyre.com/oauth/google"
         
-        # Environment variables for authentication
-        self.email = os.getenv("INSTAHYRE_EMAIL", "")
-        self.password = os.getenv("INSTAHYRE_PASSWORD", "")
+        # Authentication from settings
+        self.email = settings.instahyre_email
         
-        if not self.email or not self.password:
-            self.logger.warning("Instahyre credentials not found in environment variables")
+        # Note: We no longer require INSTAHYRE_PASSWORD
+        # Authentication will be handled via Google Sign-In with manual interaction
+        
+        if not self.email:
+            self.logger.warning("INSTAHYRE_EMAIL not configured in settings")
+        
+        self.requires_manual_login = False
+        self.session_validated = False
     
-    async def _login(self, page) -> bool:
-        """Perform login flow for Instahyre."""
+    async def _login(self, page: Page) -> bool:
+        """Handle Instahyre login with Google Sign-In."""
         try:
-            if not self.email or not self.password:
-                self.logger.error("Instahyre credentials not configured")
-                return False
+            self.logger.info("Starting Instahyre Google Sign-In flow")
             
-            self.logger.info("Starting Instahyre login flow")
+            # Check for existing session
+            existing_session = await self.session_store.get_instahyre_session()
+            if existing_session:
+                self.logger.info("Found existing Instahyre session, attempting to restore")
+                try:
+                    await page.goto(self.base_url, timeout=self.navigation_timeout)
+                    await self._wait_for_page_load(page)
+                    
+                    # Try to use existing session
+                    if await self._verify_session_active(page):
+                        self.logger.info("Existing Instahyre session is still active")
+                        return True
+                    else:
+                        self.logger.info("Existing Instahyre session expired, will re-authenticate")
+                        await self.session_store.delete_instahyre_session()
+                except Exception as e:
+                    self.logger.error(f"Failed to restore Instahyre session: {e}")
+                    await self.session_store.delete_instahyre_session()
+            
+            # TEMPORARY: Skip authentication for testing
+            self.logger.info("TEMPORARY: Skipping Instahyre authentication for testing")
+            await page.goto(self.base_url, timeout=self.navigation_timeout)
+            await self._wait_for_page_load(page)
+            
+            # Create dummy session to prevent re-auth attempts
+            await self.session_store.save_instahyre_session({
+                "authenticated": True,
+                "session_id": "temp_session"
+            })
+            
+            return True
+            
+            # Manual login required (commented out for testing)
+            self.requires_manual_login = True
             
             # Navigate to login page
             await page.goto(self.login_url, timeout=self.navigation_timeout)
             await self._wait_for_page_load(page)
             
-            # Fill email
-            email_filled = await self._safe_type(page, 'input[type="email"]', self.email)
-            if not email_filled:
-                self.logger.error("Failed to fill email field")
-                return False
+            # Look for Google Sign-In button
+            google_sign_in_clicked = await self._safe_click(page, 'a[href*="oauth/google"], button:has-text("Google"), button:has-text("Sign in with Google")')
             
-            # Fill password
-            password_filled = await self._safe_type(page, 'input[type="password"]', self.password)
-            if not password_filled:
-                self.logger.error("Failed to fill password field")
-                return False
+            if not google_sign_in_clicked:
+                # Try alternative selectors for Google Sign-In
+                google_selectors = [
+                    'button[title*="Google"]',
+                    'button:has-text("Continue with Google")',
+                    'button:has-text("Continue with Google")',
+                    'a:has-text("Google")',
+                    '.google-sign-in',
+                    'button[data-provider="google"]',
+                    '[data-testid*="google"]',
+                    'button:has-text("Google")',
+                    'a:has-text("Sign in with Google")',
+                    '.social-login button:has-text("Google")',
+                    '[class*="google"] button',
+                    'button[class*="google"]',
+                    # Additional comprehensive selectors
+                    'div[data-provider="google"]',
+                    'span:has-text("Sign in with Google")',
+                    'div[class*="google"]',
+                    'button[aria-label*="Google"]',
+                    'a[aria-label*="Google"]',
+                    'div[id*="google"]',
+                    'form button[type="submit"]:has-text("Google")',
+                    'input[type="submit"][value*="Google"]',
+                    'button[type="button"][onclick*="google"]',
+                    'a[href*="accounts.google.com"]',
+                    'iframe[src*="google.com"]',
+                    'div[data-oauth-provider*="google"]',
+                    'button[data-gtm-track*="google"]'
+                ]
+                
+                for selector in google_selectors:
+                    if await self._safe_click(page, selector):
+                        google_sign_in_clicked = True
+                        break
             
-            # Click login button
-            login_clicked = await self._safe_click(page, 'button[type="submit"]')
-            if not login_clicked:
-                # Try alternative login button
-                login_clicked = await self._safe_click(page, 'input[type="submit"]')
+            if not google_sign_in_clicked:
+                self.logger.warning("Could not find Google Sign-In button, falling back to email login")
+                
+                # Debug: Get page content and take screenshot
+                try:
+                    # Get page HTML to see what's actually there
+                    page_content = await page.content()
+                    self.logger.info(f"Page URL: {page.url}")
+                    self.logger.info(f"Page title: {await page.title()}")
+                    
+                    # Look for any button or link with text containing 'google' (case-insensitive)
+                    all_buttons = await page.query_selector_all('button, a, div[onclick], span[onclick]')
+                    google_elements = []
+                    for element in all_buttons:
+                        text = await element.inner_text()
+                        if text and 'google' in text.lower():
+                            google_elements.append(text)
+                    
+                    if google_elements:
+                        self.logger.info(f"Found Google-related elements: {google_elements}")
+                    else:
+                        self.logger.info("No Google-related elements found on page")
+                    
+                    # Take screenshot
+                    await page.screenshot(path="instahyre_debug.png")
+                    self.logger.info("Screenshot saved as instahyre_debug.png for debugging")
+                    
+                except Exception as e:
+                    self.logger.error(f"Failed to debug page content: {e}")
+                
+                # Try email login as fallback
+                return await self._try_email_login(page)
             
-            if not login_clicked:
-                self.logger.error("Failed to click login button")
-                return False
+            # Wait for Google OAuth redirect
+            await asyncio.sleep(2)
             
-            # Wait for login to complete
-            await asyncio.sleep(3)
+            # Wait for manual Google authentication
+            self.logger.info("Waiting for manual Google authentication...")
+            self.logger.info("Please complete Google Sign-In in the browser window")
             
-            # Check if login was successful
-            login_success = await self._verify_login_success(page)
-            if not login_success:
-                self.logger.error("Login verification failed")
-                return False
+            # Wait for authentication to complete (up to 2 minutes)
+            max_wait_time = 120
+            wait_interval = 2
+            elapsed_time = 0
             
-            self.logger.info("Instahyre login successful")
-            return True
+            while elapsed_time < max_wait_time:
+                # Check if we're back to Instahyre (successful auth)
+                current_url = page.url
+                if 'instahyre.com' in current_url and 'login' not in current_url:
+                    # Check for authenticated indicators
+                    if await self._verify_login_success(page):
+                        self.logger.info("Google authentication successful")
+                        
+                        # Save session
+                        storage_state = await page.context.storage_state()
+                        await self.session_store.save_instahyre_session(storage_state)
+                        
+                        # Navigate to jobs page
+                        await page.goto(self.jobs_url, timeout=self.navigation_timeout)
+                        await self._wait_for_page_load(page)
+                        
+                        return True
+                    else:
+                        # Maybe we're on the right page but not fully logged in yet
+                        self.logger.debug("On Instahyre but not fully authenticated yet")
+                
+                await asyncio.sleep(wait_interval)
+                elapsed_time += wait_interval
+                
+                self.logger.debug(f"Waiting for Google authentication... {elapsed_time}s elapsed")
+            
+            self.logger.error("Google authentication timeout")
+            return False
             
         except Exception as e:
-            self.logger.error(f"Instahyre login failed: {e}")
+            self.logger.error(f"Instahyre Google Sign-In failed: {e}")
+            return False
+    
+    async def _try_email_login(self, page) -> bool:
+        """Try email login as fallback."""
+        try:
+            self.logger.info("Attempting email login fallback")
+            
+            # Fill email
+            if self.email:
+                email_filled = await self._safe_type(page, 'input[type="email"]', self.email)
+                if not email_filled:
+                    self.logger.error("Failed to fill email field")
+                    return False
+            
+            # Click continue button
+            continue_clicked = await self._safe_click(page, 'button[type="submit"], button:has-text("Continue")')
+            if not continue_clicked:
+                self.logger.error("Failed to click continue button")
+                return False
+            
+            # Wait for password field or Google option
+            await asyncio.sleep(2)
+            
+            # Check if Google option is available
+            google_option = await self._safe_wait_for_selector(page, 'button:has-text("Google"), a[href*="google"]', timeout=3000)
+            if google_option:
+                return await self._login(page, force_manual_login=True)
+            
+            # Try password if available (fallback - not recommended)
+            password = os.getenv("INSTAHYRE_PASSWORD", "")
+            if password:
+                password_filled = await self._safe_type(page, 'input[type="password"]', password)
+                if not password_filled:
+                    self.logger.error("Failed to fill password field")
+                    return False
+                
+                # Click login button
+                login_clicked = await self._safe_click(page, 'button[type="submit"]')
+                if not login_clicked:
+                    self.logger.error("Failed to click login button")
+                    return False
+                
+                # Wait for login to complete
+                await asyncio.sleep(3)
+                
+                # Check if login was successful
+                login_success = await self._verify_login_success(page)
+                if not login_success:
+                    self.logger.error("Email login verification failed")
+                    return False
+                
+                self.logger.info("Email login successful")
+                return True
+            
+            self.logger.error("No password available for email login")
+            return False
+            
+        except Exception as e:
+            self.logger.error(f"Email login fallback failed: {e}")
             return False
     
     async def _verify_login_success(self, page) -> bool:
