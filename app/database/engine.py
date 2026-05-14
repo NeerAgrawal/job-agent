@@ -16,3 +16,8 @@ engine = create_async_engine(
 
 # Metadata for migrations
 metadata = MetaData()
+
+
+async def close_db() -> None:
+    """Dispose of the database engine on shutdown."""
+    await engine.dispose()

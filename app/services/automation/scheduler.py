@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """Daily scheduler for automated job processing and Telegram delivery."""
 
 import asyncio
@@ -200,38 +201,141 @@ class DailyScheduler:
             self.logger.error(error_msg)
     
     async def _run_scoring(self, stats: Dict[str, Any]) -> None:
-        """Run AI scoring."""
+        """Run AI scoring using local resume or default autonomous fallback."""
         try:
             from app.services.ai.matcher import MatchingEngine
             from app.services.ai.scorer import ScoringEngine
             from app.services.ai.embeddings import EmbeddingsEngine
             from app.repositories.job import JobRepository
+            from app.services.ai.resume_parser import ResumeParser
+            from app.services.ai.profile_builder import ProfileBuilder
+            from app.models.job import Job
+            from pathlib import Path
+            from sqlalchemy import select
             
             async with get_db_session() as session:
                 repo = JobRepository(session)
-                jobs = await repo.get_all(limit=100)
                 
-                if not jobs:
-                    self.logger.warning("No jobs found for scoring")
+                # 1. Fetch up to 50 unscored jobs from DB
+                stmt = select(Job).where(Job.final_score.is_(None)).limit(50)
+                result = await session.execute(stmt)
+                unscored_jobs = result.scalars().all()
+                
+                if not unscored_jobs:
+                    self.logger.info("No unscored jobs found. Skipping scoring pipeline.")
                     stats["jobs_scored"] = 0
                     stats["steps_completed"].append("scoring")
                     return
                 
-                # Initialize AI engines
+                self.logger.info(f"Discovered {len(unscored_jobs)} unscored jobs for AI Scoring")
+                
+                # 2. Build Resume Profile (Custom or Fallback)
+                resume_path = Path("data/resume.pdf")
+                resume_text = ""
+                resume_profile = {}
+                
+                if resume_path.exists():
+                    try:
+                        self.logger.info("Found custom resume.pdf at 'data/resume.pdf', building profile...")
+                        parser = ResumeParser()
+                        builder = ProfileBuilder()
+                        
+                        # Parse unstructured text
+                        resume_data = await parser.parse_resume(str(resume_path))
+                        if resume_data:
+                            resume_text = resume_data.get("raw_text", "")
+                            profile_obj = await builder.build_profile(resume_data)
+                            
+                            if profile_obj:
+                                resume_profile = {
+                                    "target_roles": profile_obj.target_roles,
+                                    "qa_background": resume_data.get("qa_background", False),
+                                    "technical_strength": profile_obj.technical_strength,
+                                    "preferred_locations": profile_obj.preferred_locations,
+                                    "salary_preferences": profile_obj.salary_preferences
+                                }
+                    except Exception as ex:
+                        self.logger.warning(f"Failed to parse custom resume.pdf: {ex}. Reverting to defaults.")
+                
+                # Robust autonomous baseline PM profile fallback
+                if not resume_text or not resume_profile:
+                    self.logger.info("Initializing default autonomous baseline profile for scoring")
+                    resume_text = "Experienced Product Manager with 5 years building B2B SaaS platforms, microservices architectures, AI technologies, and Agile Scrum workflows."
+                    resume_profile = {
+                        "target_roles": ["Product Manager", "Technical Product Manager", "Associate Product Manager"],
+                        "qa_background": True,
+                        "technical_strength": "moderate",
+                        "preferred_locations": ["India", "Remote", "Bangalore"],
+                        "salary_preferences": {"target_salary": 80000}
+                    }
+
+                # 3. Initialize Embeddings and pre-calculate batch job payloads
+                self.logger.info("Generating embeddings for batch scoring...")
                 embeddings_engine = EmbeddingsEngine()
-                matcher = MatchingEngine(embeddings_engine)
+                await embeddings_engine.initialize()
+                
+                resume_embedding = await embeddings_engine.embed_resume(resume_text)
+                if resume_embedding is None:
+                    raise ValueError("Failed to generate root resume embedding payload")
+
+                # Generate batch embeddings for efficiency
+                job_texts = [j.jd_text or f"{j.title} at {j.company}" for j in unscored_jobs]
+                job_embeddings = await embeddings_engine.embed_jobs_batch(job_texts)
+                
+                # 4. Score and Persist Loop
                 scorer = ScoringEngine()
+                scored_count = 0
                 
-                # This would need resume path - for now, just count jobs
-                stats["jobs_scored"] = len(jobs)
+                for idx, job in enumerate(unscored_jobs):
+                    try:
+                        # Default similarity if model is offline
+                        sim_score = 0.5 
+                        if job_embeddings and idx < len(job_embeddings) and job_embeddings[idx] is not None:
+                            sim_score = await embeddings_engine.cosine_similarity(resume_embedding, job_embeddings[idx])
+                        
+                        # Run full weighted scoring
+                        score_result = await scorer.score_job(
+                            job,
+                            resume_profile,
+                            sim_score
+                        )
+                        
+                        if score_result:
+                            # Map scored results into model repository updates
+                            scores_dict = {
+                                "semantic": score_result.semantic_score,
+                                "final": score_result.final_score,
+                                "salary": score_result.salary_score,
+                                "transition": score_result.qa_to_pm_score
+                            }
+                            await repo.update_ai_scores(
+                                job.id,
+                                scores_dict,
+                                score_result.relevance_reason
+                            )
+                            scored_count += 1
+                            self.logger.debug(f"Scored: '{job.title}' -> {score_result.final_score:.1f}")
+                        else:
+                            # Assign a secure baseline below shortlist threshold for low-quality jobs
+                            # so they are not selected again for scoring in next run loops
+                            await repo.update_ai_scores(
+                                job.id,
+                                {"semantic": 0, "final": 35.0, "salary": 0, "transition": 0},
+                                "Below minimum quality threshold"
+                            )
+                            scored_count += 1
+                            
+                    except Exception as inner_ex:
+                        self.logger.warning(f"Failed to assign score to job {job.id}: {inner_ex}")
+                
+                stats["jobs_scored"] = scored_count
                 stats["steps_completed"].append("scoring")
-                
-                self.logger.info(f"✅ Scoring completed: {stats['jobs_scored']} jobs processed")
+                self.logger.info(f"✅ Scoring loop complete: {scored_count} jobs successfully processed and updated")
             
         except Exception as e:
-            error_msg = f"Scoring failed: {e}"
+            error_msg = f"Scoring pipeline failed: {e}"
             stats["errors"].append(error_msg)
-            self.logger.error(error_msg)
+            self.logger.exception(error_msg)
     
     async def _run_shortlist_generation(self, stats: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Run shortlist generation and exports."""

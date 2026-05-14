@@ -98,6 +98,28 @@ class ScoringEngine:
             # 8. Location Preference Score (5%)
             scores["location"] = self._score_location_preference(job_data, resume_profile)
             
+            # Extract specific components for mapping to DB Model
+            pm_role_score = scores["pm_role"]
+            qa_to_pm_score = scores["qa_to_pm"]
+            api_score = scores["api_platform"]
+            ai_tech_score = scores["ai_technical"]
+            salary_score = scores["salary"]
+            recency_score = scores["recency"]
+            location_score = scores["location"]
+            
+            # Calculate raw cumulative sum and normalize to standard 100-point scale
+            raw_sum = sum(scores.values())
+            final_score = min((raw_sum / 120.0) * 100.0, 100.0)
+            
+            # Generate human-readable relevance reason
+            relevance_reason = self._generate_relevance_reason(
+                pm_role_score=pm_role_score,
+                qa_to_pm_score=qa_to_pm_score,
+                api_score=api_score,
+                ai_tech_score=ai_tech_score,
+                final_score=final_score
+            )
+            
             # 9. Source Quality Bonus (5%)
             source_bonus = 0.0
             if hasattr(job_data, 'source') and job_data.source:

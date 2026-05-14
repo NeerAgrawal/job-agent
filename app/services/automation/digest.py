@@ -11,7 +11,7 @@ class DigestFormatter:
     
     def __init__(self):
         self.logger = logger.bind(service="digest")
-        self.max_jobs_per_digest = 10
+        self.max_jobs_per_digest = 50
         self.max_reason_length = 50
         self.max_title_length = 40
     
@@ -89,6 +89,7 @@ class DigestFormatter:
             salary = job.get('salary', 'Not specified')
             remote_status = job.get('remote_status', 'Unknown')
             source = job.get('source', 'Unknown')
+            relevance_reason = job.get('relevance_reason', 'Basic match')
             
             # Get source quality indicator
             source_emoji = self._get_source_emoji(source)
@@ -98,22 +99,41 @@ class DigestFormatter:
             browser_indicator = self._get_browser_indicator(job)
             
             # Direct URL
-            job_section = ""
             job_url = job.get('job_url', '')
-            if job_url:
-                job_section += f"🔗 [Apply]({job_url})\n"
             
-            job_part = (
-                f"🎯 *{title}*\n"
-                f"🏢 {company}\n"
-                f"📍 {location}\n"
-                f"⭐ Score: {score:.1f}\n"
-                f"💰 {salary}\n"
-                f"🏠 {remote_status}\n"
-                f"{source_emoji} {source_quality}\n"
-                f"{browser_indicator}\n"
-                f"🔗 [Apply]({job_url})\n"
-            )
+            # Build beautiful premium job card
+            job_part = f"🎯 *{title}*\n"
+            job_part += f"🏢 *{company}*\n"
+            
+            if location and location != "Unknown" and location != "Not specified":
+                job_part += f"📍 {location}\n"
+                
+            job_part += f"⭐ *AI Match:* {score:.1f}/100\n"
+            
+            if salary and salary != "Not specified" and salary != "None" and salary is not None:
+                job_part += f"💰 {salary}\n"
+            
+            # Format work mode neatly using Home Emoji
+            if remote_status and str(remote_status).lower() not in ['unknown', 'not specified', 'none']:
+                status_str = str(remote_status).lower()
+                if status_str == 'onsite':
+                    status_str = 'On-Site'
+                else:
+                    status_str = status_str.capitalize()
+                job_part += f"🏠 {status_str}\n"
+                
+            job_part += f"{source_emoji} Source: {source_quality}\n"
+            
+            if browser_indicator:
+                job_part += f"{browser_indicator}\n"
+                
+            # Include full AI rationale reasoning
+            if relevance_reason and relevance_reason != "None":
+                # Capitalize list tags for beauty
+                clean_reason = relevance_reason.replace(';', ' •')
+                job_part += f"📝 *Reasoning:* {clean_reason}\n"
+                
+            job_part += f"🔗 [Apply Now]({job_url})\n"
             
             job_parts.append(job_part)
         
@@ -151,6 +171,24 @@ class DigestFormatter:
         
         return digest
     
+    def _get_source_emoji(self, source: str) -> str:
+        """Get representative emoji for job source."""
+        source_lower = str(source).lower()
+        if 'lever' in source_lower:
+            return "📈"
+        elif 'greenhouse' in source_lower:
+            return "🌱"
+        elif 'wellfound' in source_lower:
+            return "✌️"
+        elif 'instahyre' in source_lower:
+            return "🦄"
+        elif 'naukri' in source_lower:
+            return "💼"
+        elif 'cutshort' in source_lower:
+            return "✂️"
+        else:
+            return "📡"
+            
     def _get_source_quality_indicator(self, score: float, source: str) -> str:
         """Get quality indicator for source."""
         if score >= 70:

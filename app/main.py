@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.core.logging import setup_logging, logger
 from app.database.migrations import create_tables
+from app.database.engine import close_db
 
 
 async def lifespan(app: FastAPI):

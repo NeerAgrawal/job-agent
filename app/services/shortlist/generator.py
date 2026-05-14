@@ -8,8 +8,6 @@ from sqlalchemy import select, desc, and_
 from app.database.session import get_db_session
 from app.models.job import Job
 from app.repositories.job import JobRepository
-from app.services.ai.matcher import MatchingEngine
-from app.services.ai.scorer import ScoringEngine
 from app.services.ai.title_filters import get_title_category
 from app.core.logging import logger
 
@@ -111,6 +109,9 @@ class ShortlistGenerator:
     async def _run_ai_matching(self, resume_path: str, jobs: List[Job]):
         """Run AI matching on fresh jobs."""
         try:
+            from app.services.ai.matcher import MatchingEngine
+            from app.services.ai.scorer import ScoringEngine
+            
             matcher = MatchingEngine()
             scorer = ScoringEngine()
             
@@ -167,7 +168,8 @@ class ShortlistGenerator:
                 "job_url": job.job_url,
                 "relevance_reason": job.relevance_reason or "No reason provided",
                 "domain_tags": job.domain_tags or [],
-                "salary": job.salary
+                "salary": job.salary,
+                "remote_status": job.remote_status
             }
             formatted_jobs.append(formatted_job)
         

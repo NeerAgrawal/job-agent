@@ -1,10 +1,12 @@
 """Instahyre browser fetcher with authentication and PM job extraction."""
+# -*- coding: utf-8 -*-
 
 import asyncio
 import os
 from typing import Dict, Any, List
 from datetime import datetime
 
+from playwright.async_api import Page
 from app.core.logging import logger
 from app.core.config.settings import settings
 from .base_browser_fetcher import BaseBrowserFetcher
@@ -32,6 +34,16 @@ class InstahyreBrowserFetcher(BaseBrowserFetcher):
         
         self.requires_manual_login = False
         self.session_validated = False
+    
+    async def _verify_session_active(self, page: Page) -> bool:
+        """Verify if the current session is authenticated."""
+        try:
+            # Check if we have login indicators on current page to avoid double-navigation
+            login_indicators = await self._get_login_indicators(page)
+            return not login_indicators
+        except Exception as e:
+            self.logger.debug(f"Error verifying session activity: {e}")
+            return False
     
     async def _login(self, page: Page) -> bool:
         """Handle Instahyre login with Google Sign-In."""
@@ -342,6 +354,10 @@ class InstahyreBrowserFetcher(BaseBrowserFetcher):
             
             # Try multiple selectors for job listings
             job_selectors = [
+                'a#employer-profile-opportunity',
+                'a.text-link[href*="/job-"]',
+                '.employer-block',
+                '.employer-row',
                 '.job-card',
                 '.job-listing',
                 '.job-item',
@@ -356,6 +372,7 @@ class InstahyreBrowserFetcher(BaseBrowserFetcher):
                     elements = await page.query_selector_all(selector)
                     if elements:
                         job_elements = elements
+                        self.logger.info(f"Matched selector '{selector}' with {len(elements)} elements")
                         break
                 except:
                     continue
@@ -388,23 +405,45 @@ class InstahyreBrowserFetcher(BaseBrowserFetcher):
         """Extract job data from a job element."""
         try:
             # Extract title
-            title_element = await element.query_selector('h1, h2, h3, h4, .title, .job-title')
+            title_element = await element.query_selector('h1, h2, h3, h4, .title, .job-title, .company-name, .employer-job-name')
             title = await self.utils.extract_text_safely(title_element) if title_element else ""
             
             if not title:
                 return None
             
-            # Filter by PM role
-            if not self.utils.is_pm_role(title) or self.utils.is_reject_role(title):
-                return None
+            # Check if element itself is a link
+            tag_name = await element.evaluate('el => el.tagName.toLowerCase()')
+            element_href = ""
+            if tag_name == 'a':
+                element_href = await element.get_attribute('href')
             
             # Extract company
-            company_element = await element.query_selector('.company, .company-name, .employer')
-            company = await self.utils.extract_text_safely(company_element) if company_element else "Unknown"
+            company_element = await element.query_selector('.company, .employer, span.info')
+            company = await self.utils.extract_text_safely(company_element) if company_element else ""
+            
+            # Parse "Company - Title" pattern common on Instahyre
+            if not company and " - " in title:
+                parts = title.split(" - ", 1)
+                company = parts[0].strip()
+                title = parts[1].strip()
+            elif " - " in title:
+                parts = title.split(" - ", 1)
+                company = parts[0].strip()
+                title = parts[1].strip()
+                
+            if not company:
+                company = "Unknown"
+            
+            # Filter by PM role (be slightly lenient, let shortlister filter precisely)
+            is_pm = self.utils.is_pm_role(title)
+            is_rejected = self.utils.is_reject_role(title)
+            if not is_pm or is_rejected:
+                return None
             
             # Extract location
-            location_element = await element.query_selector('.location, .job-location, .place')
+            location_element = await element.query_selector('.location, .job-location, .place, .employer-locations, span[ng-if*="locations"]')
             location = await self.utils.extract_text_safely(location_element) if location_element else "Not specified"
+            location = location.replace("Job available in", "").replace("Job available at", "").strip()
             
             # Extract salary
             salary_element = await element.query_selector('.salary, .compensation, .pay')
@@ -412,12 +451,17 @@ class InstahyreBrowserFetcher(BaseBrowserFetcher):
             salary = self.utils.normalize_salary(salary)
             
             # Extract description
-            desc_element = await element.query_selector('.description, .job-description, .details')
+            desc_element = await element.query_selector('.description, .job-description, .details, .employer-notes')
             description = await self.utils.extract_text_safely(desc_element) if desc_element else ""
             
             # Extract URL
-            url_element = await element.query_selector('a[href]')
-            url = await self.utils.extract_url_safely(url_element) if url_element else ""
+            url = element_href
+            if not url:
+                url_element = await element.query_selector('a[href]')
+                url = await self.utils.extract_url_safely(url_element) if url_element else ""
+            
+            if url and not url.startswith('http'):
+                url = f"https://www.instahyre.com{url}"
             
             # Normalize location
             location = self.utils.normalize_location(location)

@@ -125,7 +125,7 @@ class FetchEfficiencyAnalyzer:
             cost_per_pm = (total_jobs * avg_duration) / max(pm_jobs, 1)
             
             # Cost efficiency
-            cost_efficiency = (pm_jobs / total_jobs) * (100 / max(avg_duration, 1))
+            cost_efficiency = (pm_jobs / max(total_jobs, 1)) * (100 / max(avg_duration, 1))
             
             # Cost category
             cost_category = self._categorize_cost(cost_per_pm)

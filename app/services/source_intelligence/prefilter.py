@@ -118,7 +118,7 @@ class PMRolePreFilter:
         }
         
         self.logger.info(
-            f"Pre-filter: {total} → {early_accepted} accepted, "
+            f"Pre-filter: {total} -> {early_accepted} accepted, "
             f"{early_rejected} rejected ({rejection_rate:.1f}% rejection, "
             f"{pm_density:.1f}% PM density)"
         )

@@ -603,7 +603,33 @@ class FetcherOrchestrator:
                     if hasattr(job_data, 'model_dump'):
                         job_dict = job_data.model_dump()
                     else:
-                        job_dict = job_data
+                        job_dict = dict(job_data)  # Ensure it's a mutable dictionary copy
+                    
+                    # Defensive type-casting for numeric fields to prevent SQL insertion StatementErrors
+                    if 'salary' in job_dict:
+                        try:
+                            if job_dict['salary'] is not None:
+                                job_dict['salary'] = float(job_dict['salary'])
+                        except (ValueError, TypeError):
+                            job_dict['salary'] = None
+                            
+                    if 'applicant_count' in job_dict:
+                        try:
+                            if job_dict['applicant_count'] is not None:
+                                job_dict['applicant_count'] = int(job_dict['applicant_count'])
+                            else:
+                                job_dict['applicant_count'] = 0
+                        except (ValueError, TypeError):
+                            job_dict['applicant_count'] = 0
+                    
+                    # Defensive type-casting for DateTime fields to prevent SQLite TypeError
+                    if 'posted_at' in job_dict and isinstance(job_dict['posted_at'], str):
+                        try:
+                            # Parse standard ISO format string securely
+                            iso_str = job_dict['posted_at'].replace('Z', '+00:00')
+                            job_dict['posted_at'] = datetime.fromisoformat(iso_str)
+                        except (ValueError, TypeError):
+                            job_dict['posted_at'] = None
                     
                     await repo.create(job_dict)
                     saved_count += 1

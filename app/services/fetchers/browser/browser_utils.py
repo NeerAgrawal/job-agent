@@ -2,7 +2,7 @@
 
 import re
 from typing import Dict, Any, Optional, List
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from app.core.logging import logger
 
@@ -64,22 +64,23 @@ class BrowserUtils:
             'analyst', 'operations', 'qa engineer'
         ]
     
-    def extract_text_safely(self, element) -> str:
+    async def extract_text_safely(self, element) -> str:
         """Safely extract text from element."""
         try:
             if element:
-                text = element.text_content() or ""
+                text = await element.text_content() or ""
                 return self.clean_text(text)
         except Exception as e:
             self.logger.debug(f"Failed to extract text: {e}")
         
         return ""
     
-    def extract_attribute_safely(self, element, attribute: str) -> str:
+    async def extract_attribute_safely(self, element, attribute: str) -> str:
         """Safely extract attribute from element."""
         try:
             if element:
-                return element.get_attribute(attribute) or ""
+                res = await element.get_attribute(attribute)
+                return res or ""
         except Exception as e:
             self.logger.debug(f"Failed to extract attribute {attribute}: {e}")
         
@@ -103,25 +104,26 @@ class BrowserUtils:
         
         return text.strip()
     
-    def extract_url_safely(self, element) -> str:
+    async def extract_url_safely(self, element) -> str:
         """Safely extract URL from element."""
         try:
             if element:
                 # Try href attribute
-                href = element.get_attribute('href')
+                href = await element.get_attribute('href')
                 if href:
                     return href
                 
                 # Try data attributes
                 for attr in ['data-href', 'data-url', 'data-link']:
-                    url = element.get_attribute(attr)
+                    url = await element.get_attribute(attr)
                     if url:
                         return url
                 
                 # Try to find link inside element
-                link = element.query_selector('a[href]')
+                link = await element.query_selector('a[href]')
                 if link:
-                    return link.get_attribute('href') or ""
+                    res = await link.get_attribute('href')
+                    return res or ""
                     
         except Exception as e:
             self.logger.debug(f"Failed to extract URL: {e}")
@@ -150,11 +152,11 @@ class BrowserUtils:
         
         return False
     
-    def extract_job_from_element(self, element, source: str = "unknown") -> Optional[Dict[str, Any]]:
+    async def extract_job_from_element(self, element, source: str = "unknown") -> Optional[Dict[str, Any]]:
         """Extract job data from element."""
         try:
             # Extract title
-            title = self._extract_field(element, 'title')
+            title = await self._extract_field(element, 'title')
             if not title:
                 return None
             
@@ -163,11 +165,11 @@ class BrowserUtils:
                 return None
             
             # Extract other fields
-            company = self._extract_field(element, 'company')
-            location = self._extract_field(element, 'location')
-            salary = self._extract_field(element, 'salary')
-            description = self._extract_field(element, 'description')
-            url = self._extract_field(element, 'url')
+            company = await self._extract_field(element, 'company')
+            location = await self._extract_field(element, 'location')
+            salary = await self._extract_field(element, 'salary')
+            description = await self._extract_field(element, 'description')
+            url = await self._extract_field(element, 'url')
             
             # Build job data
             job_data = {
@@ -191,27 +193,27 @@ class BrowserUtils:
             self.logger.debug(f"Failed to extract job from element: {e}")
             return None
     
-    def _extract_field(self, element, field_type: str) -> str:
+    async def _extract_field(self, element, field_type: str) -> str:
         """Extract field using multiple selector strategies."""
         selectors = self.job_selectors.get(field_type, [])
         
         for selector in selectors:
             try:
                 # Try direct selector
-                found_element = element.query_selector(selector)
+                found_element = await element.query_selector(selector)
                 if found_element:
                     if field_type == 'url':
-                        return self.extract_url_safely(found_element)
+                        return await self.extract_url_safely(found_element)
                     else:
-                        return self.extract_text_safely(found_element)
+                        return await self.extract_text_safely(found_element)
                 
                 # Try nested search
-                found_element = element.query_selector(f'*:has({selector})')
+                found_element = await element.query_selector(f'*:has({selector})')
                 if found_element:
                     if field_type == 'url':
-                        return self.extract_url_safely(found_element)
+                        return await self.extract_url_safely(found_element)
                     else:
-                        return self.extract_text_safely(found_element)
+                        return await self.extract_text_safely(found_element)
                         
             except Exception:
                 continue
@@ -338,3 +340,27 @@ class BrowserUtils:
             
         except Exception:
             return False
+
+    def determine_remote_status(self, location: str, description: str, title: str = "") -> str:
+        """Determine if job is remote, hybrid, or onsite."""
+        try:
+            loc_lower = str(location).lower() if location else ""
+            desc_lower = str(description).lower() if description else ""
+            title_lower = str(title).lower() if title else ""
+            
+            combined = f"{loc_lower} {title_lower} {desc_lower}"
+            
+            if 'hybrid' in combined:
+                return "hybrid"
+            elif any(term in combined for term in ['remote', 'wfh', 'work from home']):
+                return "remote"
+            elif any(term in combined for term in ['onsite', 'on-site', 'in-office', 'in office']):
+                return "onsite"
+                
+            # Location-based inference for obvious office locations
+            if any(term in loc_lower for term in ['bangalore', 'hyderabad', 'noida', 'mumbai', 'pune', 'delhi', 'gurugram', 'gurgaon', 'chennai']):
+                return "onsite"
+                
+            return "remote"  # Default fallback
+        except Exception:
+            return "remote"

@@ -1,13 +1,12 @@
-"""Delivery tracking system for preventing duplicate job deliveries."""
+"""Delivery tracking system for preventing duplicate job deliveries using persistent storage."""
 
+import json
 import asyncio
+from pathlib import Path
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional, Set
 from dataclasses import dataclass
-from sqlalchemy import select, desc
 
-from app.database.session import SessionLocal
-from app.models.job import Job
 from app.core.logging import logger
 
 
@@ -23,56 +22,52 @@ class DeliveryRecord:
 
 
 class DeliveryTracker:
-    """Tracks job deliveries to prevent duplicates."""
+    """Tracks job deliveries to prevent duplicates using persistent local storage."""
     
     def __init__(self):
         self.logger = logger.bind(service="delivery_tracker")
         self._delivered_urls: Set[str] = set()
         self._delivery_records: List[DeliveryRecord] = []
         self._loaded = False
+        self.filepath = Path("data/delivered_jobs.json")
     
-    async def load_delivered_jobs(
-    self,
-    days_back: int = 30
-) -> None:
-        """Load previously delivered jobs from database."""
-
+    async def load_delivered_jobs(self, days_back: int = 30) -> None:
+        """Load previously delivered jobs from persistent storage."""
         try:
-
-            cutoff_date = datetime.utcnow() - timedelta(days=days_back)
-
-            async with SessionLocal() as session:
-
-                stmt = (
-                    select(Job)
-                    .where(Job.posted_at >= cutoff_date)
-                    .where(Job.final_score.isnot(None))
-                    .order_by(desc(Job.posted_at))
-                )
-
-                result = await session.execute(stmt)
-
-                jobs = result.scalars().all()
-
-                for job in jobs:
-
-                    if job.job_url:
-
-                        self._delivered_urls.add(job.job_url)
-
-                self._loaded = True
-
-                self.logger.info(
-                    f"Loaded {len(self._delivered_urls)} delivered URLs from last {days_back} days"
-                )
+            # Ensure the data directory exists
+            self.filepath.parent.mkdir(parents=True, exist_ok=True)
+            
+            if self.filepath.exists():
+                try:
+                    with open(self.filepath, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                        self._delivered_urls = set(data.get('delivered_urls', []))
+                        self.logger.info(f"Loaded {len(self._delivered_urls)} delivered URLs from {self.filepath}")
+                except Exception as e:
+                    self.logger.warning(f"Could not parse delivery JSON file, starting fresh: {e}")
+                    self._delivered_urls = set()
+            else:
+                self.logger.info("No delivery tracker file found, initializing fresh log")
+                self._delivered_urls = set()
+                
+            self._loaded = True
 
         except Exception as e:
-
-            self.logger.error(
-                f"Failed to load delivered jobs: {e}"
-            )
-
+            self.logger.error(f"Failed to load delivered jobs: {e}")
             self._loaded = False
+    
+    def _save_to_disk(self) -> None:
+        """Synchronously save the delivery state to persistent disk."""
+        try:
+            self.filepath.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.filepath, 'w', encoding='utf-8') as f:
+                json.dump({
+                    'last_updated': datetime.utcnow().isoformat(),
+                    'delivered_urls': list(self._delivered_urls)
+                }, f, indent=2)
+            self.logger.debug(f"Persisted {len(self._delivered_urls)} delivered URLs to {self.filepath}")
+        except Exception as e:
+            self.logger.error(f"Failed to write delivery tracker file: {e}")
         
     async def is_job_delivered(self, job_url: str) -> bool:
         """Check if a job has been delivered before."""
@@ -89,7 +84,7 @@ class DeliveryTracker:
         message_id: Optional[str] = None,
         error_message: Optional[str] = None
     ) -> None:
-        """Mark a job as delivered."""
+        """Mark a job as delivered and persist to disk."""
         try:
             delivery_record = DeliveryRecord(
                 job_url=job_url,
@@ -102,6 +97,9 @@ class DeliveryTracker:
             
             self._delivery_records.append(delivery_record)
             self._delivered_urls.add(job_url)
+            
+            # Write to persistent store
+            self._save_to_disk()
             
             self.logger.info(f"Marked job as delivered: {job_url} ({delivery_method}:{delivery_status})")
             

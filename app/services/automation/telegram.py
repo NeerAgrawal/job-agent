@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """Telegram bot service for daily job digest delivery."""
 
 import asyncio

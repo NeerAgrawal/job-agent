@@ -59,10 +59,16 @@ class Settings(BaseSettings):
     playwright_headless: bool = Field(default=True, env="PLAYWRIGHT_HEADLESS")
     playwright_timeout: int = Field(default=30000, env="PLAYWRIGHT_TIMEOUT")
     
+    # Job Automation
+    max_jobs_per_day: int = Field(default=10, env="MAX_JOBS_PER_DAY")
+    min_score_threshold: float = Field(default=45.0, env="MIN_SCORE_THRESHOLD")
+    
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
         case_sensitive = False
+        extra = "ignore"
+
 
 
 # Global settings instance

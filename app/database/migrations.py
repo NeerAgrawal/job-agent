@@ -20,7 +20,8 @@ async def create_tables():
             # Verify each table exists
             for table_name in tables:
                 try:
-                    result = await conn.execute(f"SELECT COUNT(*) FROM {table_name}")
+                    from sqlalchemy import text
+                    result = await conn.execute(text(f"SELECT COUNT(*) FROM {table_name}"))
                     count = result.scalar()
                     logger.info(f"Table '{table_name}' exists with {count} rows")
                 except Exception as e:

@@ -24,7 +24,11 @@ class BaseRepository(Generic[ModelType]):
     async def create(self, obj_data: Dict[str, Any]) -> ModelType:
         """Create a new record."""
         try:
-            db_obj = self.model(**obj_data)
+            # Filter to only valid mapper attributes to avoid TypeErrors from extra metadata keys
+            valid_fields = {attr.key for attr in self.model.__mapper__.attrs}
+            valid_data = {k: v for k, v in obj_data.items() if k in valid_fields}
+            
+            db_obj = self.model(**valid_data)
             self.session.add(db_obj)
             await self.session.commit()
             await self.session.refresh(db_obj)

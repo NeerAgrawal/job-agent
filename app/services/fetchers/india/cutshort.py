@@ -1,6 +1,8 @@
 """Cutshort job fetcher for India PM opportunities."""
 
 import httpx
+import json
+import re
 from typing import List, Dict, Any
 from datetime import datetime
 
@@ -87,6 +89,106 @@ class CutshortFetcher(BaseIndiaFetcher):
                 "html.parser"
             )
 
+            # 1. Try JSON State extraction first (highly precise & complete)
+            script_tag = soup.find('script', id='__NEXT_DATA__')
+            if not script_tag:
+                for s in soup.find_all('script'):
+                    if s.string and '{"props":' in s.string:
+                        script_tag = s
+                        break
+            
+            if script_tag and script_tag.string:
+                try:
+                    data = json.loads(script_tag.string)
+                    self.logger.info("Found Cutshort Next.js state, attempting to extract jobs from JSON")
+                    
+                    props = data.get('props', {})
+                    page_props = props.get('pageProps', {})
+                    dehydrated = page_props.get('dehydratedState', {})
+                    queries = dehydrated.get('queries', [])
+                    
+                    json_jobs = []
+                    if queries and len(queries) > 0:
+                        # Search across queries for pageData.jobs
+                        for q in queries:
+                            st = q.get('state', {})
+                            in_data = st.get('data', {})
+                            
+                            # Case where inner structure varies slightly
+                            c_data = in_data.get('data', {}) if isinstance(in_data, dict) else {}
+                            p_data = c_data.get('pageData', {}) if isinstance(c_data, dict) else {}
+                            j_list = p_data.get('jobs', []) if isinstance(p_data, dict) else []
+                            
+                            if j_list:
+                                json_jobs = j_list
+                                break
+                                
+                    if json_jobs:
+                        self.logger.info(f"Successfully extracted {len(json_jobs)} jobs from Cutshort JSON state")
+                        
+                        parsed_jobs = []
+                        for job in json_jobs[:limit]:
+                            try:
+                                headline = job.get('headline', '')
+                                url = job.get('publicUrl', '')
+                                
+                                comp_details = job.get('companyDetails', {}) or {}
+                                company_name = comp_details.get('name', '')
+                                if not company_name:
+                                    company_name = "Unknown"
+                                
+                                salary_text = job.get('salaryRangeText', '')
+                                salary = self._parse_salary(salary_text)
+                                
+                                location = job.get('locationsText', '')
+                                if not location:
+                                    locs = job.get('locations', [])
+                                    location = ", ".join(locs) if isinstance(locs, list) else str(locs)
+                                    
+                                desc_html = job.get('sanitizedComment', '')
+                                desc_text = re.sub('<[^<]+?>', '', desc_html) if desc_html else ""
+                                
+                                remote_val = job.get('remoteType', '')
+                                remote_status = "Remote" if "remote_okay" in str(remote_val).lower() or "hybrid" in str(remote_val).lower() else "On-site"
+                                
+                                domain_tags = self._extract_domain_tags(desc_text)
+                                
+                                job_data = {
+                                    "title": headline,
+                                    "company": company_name,
+                                    "location": self._normalize_location(location),
+                                    "salary": salary,
+                                    "job_url": url,
+                                    "posted_at": datetime.utcnow(),
+                                    "jd_text": desc_text,
+                                    "applicant_count": 0,
+                                    "remote_status": remote_status,
+                                    "domain_tags": domain_tags,
+                                    "source": "Cutshort",
+                                    "raw_metadata": {
+                                        "job_id": job.get('_id'),
+                                        "found_at": datetime.utcnow().isoformat(),
+                                        "extraction_method": "json_state"
+                                    }
+                                }
+                                
+                                # Keep strict role filter only
+                                if self._validate_job(job_data):
+                                    parsed_jobs.append(job_data)
+                                    
+                            except Exception as e:
+                                self.logger.error(f"Failed parsing single Cutshort JSON job: {e}")
+                                continue
+                                
+                        if parsed_jobs:
+                            self.logger.info(f"Successfully parsed {len(parsed_jobs)} valid PM jobs from Cutshort JSON")
+                            return parsed_jobs
+                            
+                except Exception as json_err:
+                    self.logger.warning(f"Failed to parse Cutshort JSON payload: {json_err}. Falling back to DOM scraper.")
+
+            # 2. Fallback to DOM Scraper
+            self.logger.info("Falling back to Cutshort DOM Scraping")
             jobs = []
 
             # Try multiple selector patterns for Cutshort job listings
@@ -119,21 +221,12 @@ class CutshortFetcher(BaseIndiaFetcher):
                 self.logger.info(f"Fallback: Found {len(job_elements)} potential job elements")
 
             self.logger.info(
-                f"Found {len(job_elements)} "
-                f"Cutshort job elements"
+                f"Found {len(job_elements)} Cutshort job elements"
             )
 
             for element in job_elements[:limit]:
-
-                job_data = self._parse_job_element(
-                    element
-                )
-
-                if (
-                    job_data
-                    and self._validate_job(job_data)
-                ):
-
+                job_data = self._parse_job_element(element)
+                if job_data and self._validate_job(job_data):
                     jobs.append(job_data)
 
             return jobs
