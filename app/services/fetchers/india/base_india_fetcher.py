@@ -8,28 +8,18 @@ from bs4 import BeautifulSoup
 from datetime import datetime
 
 from app.core.logging import logger
+from app.services.ai.title_filters import get_title_category
 from .utils import IndiaFetchUtils
 
 
 class BaseIndiaFetcher:
     """Base class for India job fetchers."""
-    
+
     def __init__(self, name: str, base_url: str):
         self.name = name
         self.base_url = base_url
         self.logger = logger.bind(service=f"india_{name}")
         self.utils = IndiaFetchUtils()
-        self.pm_titles = {
-            # Accept PM roles
-            "product manager", "associate product manager", "technical product manager",
-            "ai product manager", "platform product manager", "growth product manager",
-            "senior product manager", "principal product manager", "group product manager"
-        }
-        self.reject_titles = {
-            # Reject non-PM roles
-            "sales", "qa", "recruiter", "support", "analyst", "marketing",
-            "customer success", "engineer", "intern", "business development"
-        }
     
     async def fetch_jobs(
     self,
@@ -77,24 +67,20 @@ class BaseIndiaFetcher:
         raise NotImplementedError("Subclasses must implement _fetch_from_source method")
     
     def _filter_pm_roles(self, jobs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Filter jobs to PM-only roles."""
+        """Filter jobs to target product-transition roles.
+
+        Delegates to the shared title taxonomy so this coarse first-pass filter
+        stays consistent with the orchestrator prefilter and the scorer.
+        """
         pm_jobs = []
-        
+
         for job in jobs:
-            title = job.get('title', '').lower()
-            
-            # Check if title contains PM role
-            is_pm = any(pm_role in title for pm_role in self.pm_titles)
-            
-            # Check if title contains reject role
-            is_reject = any(reject_role in title for reject_role in self.reject_titles)
-            
-            # Accept if PM role and not reject role
-            if is_pm and not is_reject:
+            title = job.get('title', '')
+            if get_title_category(title) == "pm":
                 pm_jobs.append(job)
             else:
-                self.logger.debug(f"Filtered non-PM role: {title}")
-        
+                self.logger.debug(f"Filtered non-target role: {title}")
+
         return pm_jobs
     
     def _validate_job(self, job: Dict[str, Any]) -> bool:

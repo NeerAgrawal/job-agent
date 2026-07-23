@@ -5,6 +5,10 @@ from typing import Dict, Any, Optional, List
 from datetime import datetime, timedelta
 
 from app.core.logging import logger
+from app.services.ai.title_filters import (
+    is_pm_role as _title_is_pm_role,
+    is_reject_role as _title_is_reject_role,
+)
 
 
 class BrowserUtils:
@@ -131,26 +135,12 @@ class BrowserUtils:
         return ""
     
     def is_pm_role(self, title: str) -> bool:
-        """Check if job title is a PM role."""
-        title_lower = title.lower()
-        
-        # Check for PM keywords
-        for keyword in self.pm_keywords:
-            if keyword in title_lower:
-                return True
-        
-        return False
-    
+        """Check if job title is a target product role (delegates to shared taxonomy)."""
+        return _title_is_pm_role(title)
+
     def is_reject_role(self, title: str) -> bool:
-        """Check if job title should be rejected."""
-        title_lower = title.lower()
-        
-        # Check for reject keywords
-        for keyword in self.reject_roles:
-            if keyword in title_lower:
-                return True
-        
-        return False
+        """Check if job title should be rejected (delegates to shared taxonomy)."""
+        return _title_is_reject_role(title)
     
     async def extract_job_from_element(self, element, source: str = "unknown") -> Optional[Dict[str, Any]]:
         """Extract job data from element."""

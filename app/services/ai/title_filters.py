@@ -3,40 +3,56 @@
 import re
 from typing import Set, List
 
-# Allowed PM titles (lowercase for matching)
+# Allowed target titles (lowercase for matching).
+# Scoped for a QA -> Product transition: entry-level / IC product roles and
+# adjacent product-related roles that leverage a technical/QA background, but
+# not senior/leadership roles (see SENIORITY_REJECT_MARKERS below).
 ALLOWED_PM_TITLES: Set[str] = {
-    # Transition-friendly PM titles (prioritized)
-    "associate product manager", 
+    # Transition-friendly product titles (prioritized)
+    "associate product manager",
     "technical product manager",
     "ai product manager",
     "platform product manager",
     "apm",
     "product owner",
     "junior product manager",
-    
-    # Soft penalize but still allow
-    "senior product manager",
-    
+
     # Traditional PM roles
     "product manager",
     "product operations manager",
-    "growth product manager"
+    "product operations",
+    "growth product manager",
+
+    # Product-adjacent roles that fit a QA/technical transition
+    "product analyst",
+    "technical program manager",
 }
 
-# Hard reject for transition (moved to separate set)
+# Hard reject for transition: roles too senior to be a realistic first product role.
 TRANSITION_REJECT_TITLES: Set[str] = {
     "principal product manager",
     "lead product manager",
     "group product manager",
     "director of product",
     "vp of product",
-    "head of product"
+    "head of product",
+    "senior product manager",
 }
 
-# Allowed, but penalized rather than prioritized for a transition candidate
-# (see "Soft penalize but still allow" in ALLOWED_PM_TITLES above)
-SOFT_PENALIZE_TITLES: Set[str] = {
-    "senior product manager"
+# Standalone seniority markers that disqualify a role regardless of the product
+# keyword it's attached to (e.g. "Senior Product Analyst", "Staff PM"). Checked
+# as whitespace-delimited tokens so they don't match inside unrelated words.
+SENIORITY_REJECT_MARKERS: Set[str] = {
+    "senior",
+    "sr",
+    "principal",
+    "staff",
+    "lead",
+    "director",
+    "vp",
+    "vice president",
+    "head of",
+    "group",
 }
 
 # Reject titles (lowercase for matching)
@@ -594,53 +610,70 @@ def normalize_title(title: str) -> str:
     return normalized
 
 
+def _has_seniority_marker(normalized: str) -> bool:
+    """True if the (already normalized) title contains a standalone seniority marker.
+
+    Matching is token-based so, e.g., "senior" matches "senior product manager" but
+    a marker like "lead" won't fire inside "leadership" or "leaderboard".
+    """
+    tokens = normalized.split()
+    token_set = set(tokens)
+
+    for marker in SENIORITY_REJECT_MARKERS:
+        if " " in marker:
+            # Multi-word marker (e.g. "head of", "vice president")
+            if marker in normalized:
+                return True
+        elif marker in token_set:
+            return True
+
+    return False
+
+
 def allow_title(title: str) -> bool:
-    """Check if job title is allowed (PM-relevant)."""
+    """Check if job title is allowed (a target product-transition role)."""
     if not title:
         return False
-    
+
     normalized = normalize_title(title)
-    
-    # Check if any allowed PM title is in the job title
+
+    # Seniority disqualifies regardless of the product keyword attached to it
+    if _has_seniority_marker(normalized):
+        return False
+
     for allowed_title in ALLOWED_PM_TITLES:
         if allowed_title in normalized:
             return True
-    
+
     return False
 
 
 def is_transition_friendly(title: str) -> bool:
-    """Check if title is transition-friendly."""
+    """Check if title is transition-friendly (a target role and not too senior)."""
     if not title:
         return False
-    
+
     normalized = normalize_title(title)
-    
-    # Check for transition-friendly titles
+
+    if _has_seniority_marker(normalized):
+        return False
+
+    for reject_title_entry in TRANSITION_REJECT_TITLES:
+        if reject_title_entry in normalized:
+            return False
+
     for allowed_title in ALLOWED_PM_TITLES:
         if allowed_title in normalized:
             return True
-    
-    # Check if it's a hard reject
-    for reject_title in TRANSITION_REJECT_TITLES:
-        if reject_title in normalized:
-            return False
-    
-    return True
+
+    return False
 
 
 def is_transition_penalized(title: str) -> bool:
-    """Check if title should be penalized but allowed."""
-    if not title:
-        return False
-    
-    normalized = normalize_title(title)
-    
-    # Check if it's a soft penalize title
-    for penalized_title in SOFT_PENALIZE_TITLES:
-        if penalized_title in normalized:
-            return True
-    
+    """Deprecated: senior roles are now hard-rejected rather than soft-penalized.
+
+    Retained for backward compatibility; always returns False.
+    """
     return False
 
 
@@ -648,49 +681,74 @@ def reject_title(title: str) -> bool:
     """Check if job title should be rejected."""
     if not title:
         return True
-    
+
     normalized = normalize_title(title)
-    
+
+    # Seniority markers (senior/principal/lead/staff/director/vp/head of/group)
+    if _has_seniority_marker(normalized):
+        return True
+
     # Check if any reject title is in the job title
-    for reject_title in REJECT_TITLES:
-        if reject_title in normalized:
+    for reject_entry in REJECT_TITLES:
+        if reject_entry in normalized:
             return True
-    
+
     # Check if any transition reject title is in the job title
-    for reject_title in TRANSITION_REJECT_TITLES:
-        if reject_title in normalized:
+    for reject_entry in TRANSITION_REJECT_TITLES:
+        if reject_entry in normalized:
             return True
-    
+
     return False
 
 
 def filter_pm_titles(titles: List[str]) -> List[str]:
-    """Filter list of job titles to only PM-relevant ones."""
+    """Filter list of job titles to only target product-transition roles."""
     pm_titles = []
-    
+
     for title in titles:
-        if allow_title(title) and not reject_title(title):
+        if get_title_category(title) == "pm":
             pm_titles.append(title)
-    
+
     return pm_titles
 
 
 def get_title_category(title: str) -> str:
-    """Get the category of a job title."""
+    """Get the category of a job title.
+
+    Precedence is deliberate and staged:
+      1. Seniority markers -> reject (so "Senior Product Manager" can't slip through
+         on the allowed substring "product manager").
+      2. Explicit too-senior product roles -> reject.
+      3. Allowed target roles -> pm (must run BEFORE the generic reject list, since
+         "technical program manager"/"product analyst" contain the generic reject
+         substrings "program manager"/"analyst").
+      4. Generic non-product reject list -> reject.
+      5. Otherwise -> unknown.
+    """
     if not title:
         return "unknown"
-    
+
     normalized = normalize_title(title)
-    
-    # Check for PM roles
+
+    # 1. Seniority disqualifier
+    if _has_seniority_marker(normalized):
+        return "reject"
+
+    # 2. Explicit too-senior product roles
+    for reject_entry in TRANSITION_REJECT_TITLES:
+        if reject_entry in normalized:
+            return "reject"
+
+    # 3. Allowed target product roles
     for allowed_title in ALLOWED_PM_TITLES:
         if allowed_title in normalized:
             return "pm"
-    
-    # Check for reject categories
-    if reject_title(title):
-        return "reject"
-    
+
+    # 4. Generic non-product reject list
+    for reject_entry in REJECT_TITLES:
+        if reject_entry in normalized:
+            return "reject"
+
     return "unknown"
 
 

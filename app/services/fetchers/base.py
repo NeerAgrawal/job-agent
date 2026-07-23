@@ -43,63 +43,10 @@ class BaseFetcher(ABC):
         pass
 
     def is_pm_role(self, title: str) -> bool:
+        """Check if a title is a target product role.
+
+        Delegates to the shared title taxonomy in
+        ``app.services.ai.title_filters`` so all fetchers share one definition.
         """
-        Strict PM role filtering.
-        Only allow real PM roles.
-        """
-
-        if not title:
-            return False
-
-        title = title.lower().strip()
-
-        ACCEPT_KEYWORDS = [
-            "product manager",
-            "technical product manager",
-            "senior product manager",
-            "associate product manager",
-            "platform product manager",
-            "ai product manager",
-            "growth product manager",
-            "apm",
-            "product owner",
-        ]
-
-        REJECT_KEYWORDS = [
-            "account executive",
-            "sales",
-            "recruiter",
-            "coordinator",
-            "designer",
-            "engineer",
-            "developer",
-            "marketing",
-            "finance",
-            "operations",
-            "customer success",
-            "support",
-            "attorney",
-            "legal",
-            "hr",
-            "analyst",
-            "scientist",
-            "android",
-            "ios",
-            "frontend",
-            "backend",
-            "full stack",
-            "data engineer",
-            "software engineer",
-        ]
-
-        has_accept = any(
-            keyword in title
-            for keyword in ACCEPT_KEYWORDS
-        )
-
-        has_reject = any(
-            keyword in title
-            for keyword in REJECT_KEYWORDS
-        )
-
-        return has_accept and not has_reject
+        from app.services.ai.title_filters import is_pm_role as _title_is_pm_role
+        return _title_is_pm_role(title)
