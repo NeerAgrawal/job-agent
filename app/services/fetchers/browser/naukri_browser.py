@@ -15,12 +15,61 @@ class NaukriBrowserFetcher(BaseBrowserFetcher):
     def __init__(self):
         super().__init__(name="naukri_browser", base_url="https://www.naukri.com")
         self.utils = BrowserUtils()
-        self.jobs_url = "https://www.naukri.com/product-manager-jobs"
-        
+        # Naukri routes role searches via slug URLs. Search across all target
+        # transition roles (verified live) rather than only "product manager",
+        # which broadens India coverage substantially (e.g. Technical Program
+        # Manager and Product Owner both return full pages of relevant roles).
+        self.role_search_urls = [
+            "https://www.naukri.com/product-manager-jobs",
+            "https://www.naukri.com/associate-product-manager-jobs",
+            "https://www.naukri.com/technical-program-manager-jobs",
+            "https://www.naukri.com/product-owner-jobs",
+            "https://www.naukri.com/product-analyst-jobs",
+        ]
+        # Kept for base-class helpers (e.g. session checks) that expect a single URL
+        self.jobs_url = self.role_search_urls[0]
+
     async def _login(self, page) -> bool:
         """Naukri doesn't require authentication for basic job search."""
         self.logger.info("Naukri browser fetcher - no authentication required")
         return True
+
+    async def _authenticated_fetch(self, page, limit: int, filters: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Fetch across all target-role search URLs, distributing the limit and
+        de-duplicating by job URL so the same posting listed under multiple role
+        searches is only returned once."""
+        all_jobs: List[Dict[str, Any]] = []
+        seen = set()
+
+        num_roles = len(self.role_search_urls)
+        per_url = max(3, -(-limit // num_roles))  # ceil division, min 3 per role
+
+        for url in self.role_search_urls:
+            if len(all_jobs) >= limit:
+                break
+            try:
+                await page.goto(url, timeout=self.navigation_timeout)
+                await self._wait_for_page_load(page)
+                await asyncio.sleep(2)
+            except Exception as e:
+                self.logger.warning(f"Naukri role search failed for {url}: {e}")
+                continue
+
+            jobs = await self._extract_jobs(page, per_url)
+            for job in jobs:
+                key = job.get('job_url') or (job.get('title'), job.get('company'))
+                if key in seen:
+                    continue
+                seen.add(key)
+                all_jobs.append(job)
+                if len(all_jobs) >= limit:
+                    break
+
+        self.logger.info(
+            f"Naukri multi-role fetch: {len(all_jobs)} unique jobs "
+            f"across {num_roles} role searches"
+        )
+        return all_jobs
     
     async def _navigate_to_jobs(self, page, filters: Dict[str, Any]) -> None:
         """Navigate to Naukri PM job listings."""
