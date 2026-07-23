@@ -179,24 +179,6 @@ class NaukriFetcher(BaseIndiaFetcher):
             self.logger.error(f"Job element parsing failed: {e}")
             return {}
     
-    def _determine_remote_status(self, location: str, description: str) -> str:
-        """Determine if job is remote."""
-        if not location or not description:
-            return "Not specified"
-        
-        location_lower = location.lower()
-        desc_lower = description.lower()
-        
-        # Check for remote keywords
-        remote_keywords = ['remote', 'work from home', 'hybrid', 'wfh']
-        if any(keyword in location_lower for keyword in remote_keywords):
-            return "Remote"
-        
-        if any(keyword in desc_lower for keyword in remote_keywords):
-            return "Remote"
-        
-        return "On-site"
-    
     def _parse_datetime(self, date_text: str) -> datetime:
         """Parse posted datetime."""
         if not date_text:

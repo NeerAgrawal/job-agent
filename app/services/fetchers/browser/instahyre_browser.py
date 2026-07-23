@@ -474,6 +474,7 @@ class InstahyreBrowserFetcher(BaseBrowserFetcher):
                 'salary': salary,
                 'job_url': url,
                 'jd_text': description,
+                'remote_status': self.utils.determine_remote_status(location, description, title),
                 'source': 'instahyre_browser',
                 'posted_at': datetime.utcnow().isoformat(),
                 'raw_metadata': {

@@ -149,7 +149,7 @@ class CutshortFetcher(BaseIndiaFetcher):
                                 desc_text = re.sub('<[^<]+?>', '', desc_html) if desc_html else ""
                                 
                                 remote_val = job.get('remoteType', '')
-                                remote_status = "Remote" if "remote_okay" in str(remote_val).lower() or "hybrid" in str(remote_val).lower() else "On-site"
+                                remote_status = self._determine_remote_status(remote_val, location, desc_text)
                                 
                                 domain_tags = self._extract_domain_tags(desc_text)
                                 
@@ -399,32 +399,6 @@ class CutshortFetcher(BaseIndiaFetcher):
             )
 
             return {}
-
-    def _determine_remote_status(
-        self,
-        location: str,
-        description: str
-    ) -> str:
-        """Determine remote status."""
-
-        combined = (
-            f"{location} {description}"
-        ).lower()
-
-        remote_keywords = [
-            "remote",
-            "work from home",
-            "hybrid",
-            "wfh"
-        ]
-
-        if any(
-            keyword in combined
-            for keyword in remote_keywords
-        ):
-            return "Remote"
-
-        return "On-site"
 
     def _parse_datetime(
         self,

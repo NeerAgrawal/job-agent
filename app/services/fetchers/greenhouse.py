@@ -25,9 +25,24 @@ class GreenhouseFetcher(BaseFetcher):
         )
 
         self.company_boards = company_boards or [
+            # High-quality PM-focused companies with strong technical products
             "stripe",
-            "airbnb",
-            "postman"
+            "postman",
+            "datadog",
+            "plaid",
+            "mongodb",
+            "mixpanel",
+            "atlassian",
+            "segment",
+            "cloudflare",
+            "vercel",
+            "webflow",
+            "figma",
+            "zapier",
+            # Removed: notion (broken board), openai (broken board)
+            # Removed: airbnb, discord, coinbase, olark, reddit, robinhood
+            # Removed: block, nubank, mercury, affirm, brex, ramp, deel
+            # Removed: gusto, justworks, rippling, benchling (non-PM focused)
         ]
 
         self.rate_limiter = asyncio.Semaphore(10)
@@ -458,27 +473,6 @@ class GreenhouseFetcher(BaseFetcher):
             "strategy",
             "growth",
             "microservices"
-        ]
-
-        self.company_boards = [
-            # High-quality PM-focused companies with strong technical products
-            "stripe",
-            "postman",
-            "datadog",
-            "plaid",
-            "mongodb",
-            "mixpanel",
-            "atlassian",
-            "segment",
-            "cloudflare",
-            "vercel",
-            "webflow",
-            "figma",
-            "zapier",
-            # Removed: notion (broken board), openai (broken board)
-            # Removed: airbnb, discord, coinbase, olark, reddit, robinhood
-            # Removed: block, nubank, mercury, affirm, brex, ramp, deel
-            # Removed: gusto, justworks, rippling, benchling (non-PM focused)
         ]
 
         description_lower = (

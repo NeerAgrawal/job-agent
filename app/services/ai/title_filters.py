@@ -33,6 +33,12 @@ TRANSITION_REJECT_TITLES: Set[str] = {
     "head of product"
 }
 
+# Allowed, but penalized rather than prioritized for a transition candidate
+# (see "Soft penalize but still allow" in ALLOWED_PM_TITLES above)
+SOFT_PENALIZE_TITLES: Set[str] = {
+    "senior product manager"
+}
+
 # Reject titles (lowercase for matching)
 REJECT_TITLES: Set[str] = {
     "sales",

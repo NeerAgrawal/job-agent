@@ -101,10 +101,8 @@ class ShortlistFormatter:
         # Round to nearest 5k
         rounded_salary = round(salary / 5000) * 5000
         
-        if rounded_salary < 80000:
+        if rounded_salary < 120000:
             return f"${int(rounded_salary/1000)}k"
-        elif rounded_salary < 120000:
-            return f"${int(rounded_salary/1000)}k-${int(rounded_salary/5000)}k"
         else:
             return f"${int(rounded_salary/1000)}k+"
     

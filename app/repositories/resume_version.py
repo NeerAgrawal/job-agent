@@ -3,7 +3,7 @@
 from typing import List, Optional
 from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, or_, desc, asc
+from sqlalchemy import select, update, and_, or_, desc, asc
 from sqlalchemy.sql import func
 
 from app.models import ResumeVersion
@@ -49,9 +49,9 @@ class ResumeVersionRepository(BaseRepository[ResumeVersion]):
         try:
             # First, unset any existing primary version
             await self.session.execute(
-                select(self.model).where(self.model.is_primary == True)
+                update(self.model).where(self.model.is_primary == True).values(is_primary=False)
             )
-            
+
             # Set new primary version
             db_obj = await self.get_by_id(version_id)
             if db_obj:

@@ -113,7 +113,22 @@ class BaseIndiaFetcher:
             return False
         
         return True
-    
+
+    def _determine_remote_status(self, *signals: str) -> str:
+        """Determine remote/hybrid/onsite from one or more raw text signals
+        (e.g. location text, description, a structured remote-type tag). Combining
+        every available signal here avoids subclasses deriving remote_status from a
+        different field than the one used for the displayed location, which can
+        otherwise show contradictory results (e.g. location 'Remote India' next to
+        remote_status 'On-site')."""
+        combined = " ".join(str(s) for s in signals if s).lower()
+
+        if any(keyword in combined for keyword in ["remote_okay", "remote", "work from home", "wfh"]):
+            return "remote"
+        if "hybrid" in combined:
+            return "hybrid"
+        return "onsite"
+
     def _normalize_location(self, location: str) -> str:
         """Normalize India location names."""
         if not location:

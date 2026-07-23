@@ -78,13 +78,22 @@ class SourceWeightManager:
             ),
         }
     
+    def _normalize_source_name(self, source_name: str) -> str:
+        """Normalize a source name for weight lookup (case-insensitive, strips browser-fallback suffix)."""
+        normalized = (source_name or "").strip().lower()
+        if normalized.endswith("_browser"):
+            normalized = normalized[: -len("_browser")]
+        return normalized
+
     def get_source_weight(self, source_name: str) -> float:
         """Get overall weight for a source."""
-        if source_name not in self.source_weights:
+        normalized = self._normalize_source_name(source_name)
+
+        if normalized not in self.source_weights:
             self.logger.warning(f"Unknown source: {source_name}, using default weight 0.5")
             return 0.5
-        
-        weight = self.source_weights[source_name].overall_weight
+
+        weight = self.source_weights[normalized].overall_weight
         self.logger.debug(f"Source {source_name} weight: {weight:.2f}")
         return weight
     
@@ -104,11 +113,13 @@ class SourceWeightManager:
     
     def update_source_weight(self, source_name: str, metric_updates: Dict[str, float]) -> None:
         """Update source weights based on performance metrics."""
-        if source_name not in self.source_weights:
+        normalized = self._normalize_source_name(source_name)
+
+        if normalized not in self.source_weights:
             self.logger.warning(f"Cannot update unknown source: {source_name}")
             return
-        
-        current_weight = self.source_weights[source_name]
+
+        current_weight = self.source_weights[normalized]
         
         # Update weights based on performance
         if 'pm_density' in metric_updates:

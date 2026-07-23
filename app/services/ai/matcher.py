@@ -69,8 +69,8 @@ class MatchingEngine:
                     matches.append(match)
             
             # Sort with transition-friendly priority
-            transition_friendly_matches = [m for m in matches if hasattr(m, 'transition_friendly')]
-            other_pm_matches = [m for m in matches if not hasattr(m, 'transition_friendly')]
+            transition_friendly_matches = [m for m in matches if m.transition_friendly]
+            other_pm_matches = [m for m in matches if not m.transition_friendly]
             
             # Sort each group by similarity score (descending)
             transition_friendly_sorted = sorted(transition_friendly_matches, key=lambda x: x.similarity_score, reverse=True)

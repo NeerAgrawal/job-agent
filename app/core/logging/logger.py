@@ -3,10 +3,21 @@ from pathlib import Path
 from loguru import logger
 from app.core.config import settings
 
+# Windows consoles default to a legacy codepage (e.g. cp1252), not UTF-8. Since log
+# messages and CLI output throughout this project use emoji, force UTF-8 on stdout/
+# stderr as early as possible (module import time) so it applies before loguru's
+# default handler or any print() call in a script that imports this module.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
 
 def setup_logging() -> None:
     """Configure logging with loguru."""
-    
+
     # Remove default handler
     logger.remove()
     

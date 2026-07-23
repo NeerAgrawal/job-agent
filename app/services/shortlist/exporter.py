@@ -197,10 +197,8 @@ class ShortlistExporter:
         if not salary or salary <= 0:
             return "Not specified"
         
-        if salary < 80000:
+        if salary < 120000:
             return f"${int(salary/1000)}k"
-        elif salary < 120000:
-            return f"${int(salary/1000)}k-${int(salary/5000)}k"
         else:
             return f"${int(salary/1000)}k+"
     

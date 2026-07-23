@@ -2,6 +2,7 @@
 
 import uuid
 from datetime import datetime, timedelta
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.engine import engine

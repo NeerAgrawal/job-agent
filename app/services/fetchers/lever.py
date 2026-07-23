@@ -16,9 +16,10 @@ from app.services.ai.title_filters import is_pm_role, is_reject_role
 class LeverFetcher(BaseFetcher):
     """Lever job board fetcher."""
 
-    def __init__(self):
+    def __init__(self, company_boards: Optional[List[str]] = None):
         super().__init__("Lever")
         self.base_url = "https://api.lever.co/v0/postings"
+        self.company_boards = company_boards or ["spotify"]
         self.rate_limiter = asyncio.Semaphore(10)
 
     async def fetch_jobs(
@@ -64,11 +65,9 @@ class LeverFetcher(BaseFetcher):
     async def _get_all_postings(self) -> List[Dict[str, Any]]:
         """Fetch postings from multiple Lever companies."""
 
-        companies = ["spotify"]
-
         all_postings = []
 
-        for company in companies:
+        for company in self.company_boards:
             try:
                 postings = await self._fetch_company_postings(company)
 

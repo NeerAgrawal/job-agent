@@ -137,7 +137,7 @@ class ScoringEngine:
                 job_id=str(job_data.id),
                 title=job_data.title,
                 company=job_data.company,
-                semantic_score=0.0,
+                semantic_score=scores["semantic"],
                 pm_role_score=pm_role_score,
                 qa_to_pm_score=qa_to_pm_score,
                 api_platform_score=api_score,

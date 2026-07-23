@@ -109,35 +109,61 @@ class ShortlistGenerator:
     async def _run_ai_matching(self, resume_path: str, jobs: List[Job]):
         """Run AI matching on fresh jobs."""
         try:
-            from app.services.ai.matcher import MatchingEngine
+            from app.services.ai.resume_parser import ResumeParser
+            from app.services.ai.profile_builder import ProfileBuilder
+            from app.services.ai.embeddings import EmbeddingsEngine
             from app.services.ai.scorer import ScoringEngine
-            
-            matcher = MatchingEngine()
+
+            # Parse resume and build a candidate profile
+            resume_data = await ResumeParser().parse_resume(resume_path)
+            if not resume_data:
+                logger.error(f"Failed to parse resume at {resume_path}")
+                return
+
+            profile_obj = await ProfileBuilder().build_profile(resume_data)
+            resume_profile = {
+                "target_roles": profile_obj.target_roles,
+                "qa_background": resume_data.get("qa_background", False),
+                "technical_strength": profile_obj.technical_strength,
+                "preferred_locations": profile_obj.preferred_locations,
+                "salary_preferences": profile_obj.salary_preferences,
+            }
+
+            embeddings_engine = EmbeddingsEngine()
+            await embeddings_engine.initialize()
+            resume_embedding = await embeddings_engine.embed_resume(resume_data.get("raw_text", ""))
+
+            job_texts = [job.jd_text or f"{job.title} at {job.company}" for job in jobs]
+            job_embeddings = await embeddings_engine.embed_jobs_batch(job_texts)
+
             scorer = ScoringEngine()
-            
-            # Parse resume
-            profile = await matcher.parse_resume(resume_path)
-            
+
             # Score jobs
-            for job in jobs:
+            for idx, job in enumerate(jobs):
                 try:
-                    score_result = await scorer.score_job(job, profile)
-                    
+                    semantic_similarity = 0.5
+                    if resume_embedding is not None and job_embeddings and idx < len(job_embeddings) and job_embeddings[idx] is not None:
+                        semantic_similarity = await embeddings_engine.cosine_similarity(resume_embedding, job_embeddings[idx])
+
+                    score_result = await scorer.score_job(job, resume_profile, semantic_similarity)
+                    if not score_result:
+                        continue
+
+                    scores_dict = {
+                        "semantic": score_result.semantic_score,
+                        "final": score_result.final_score,
+                        "salary": score_result.salary_score,
+                        "transition": score_result.qa_to_pm_score,
+                    }
+
                     # Update scores in database
                     async with get_db_session() as session:
                         repo = JobRepository(session)
-                        await repo.update_ai_scores(
-                            job_id=job.id,
-                            semantic_score=score_result.get("semantic_score"),
-                            final_score=score_result.get("final_score"),
-                            salary_score=score_result.get("salary_score"),
-                            transition_score=score_result.get("transition_score"),
-                            relevance_reason=score_result.get("relevance_reason")
-                        )
-                        
+                        await repo.update_ai_scores(job.id, scores_dict, score_result.relevance_reason)
+
                 except Exception as e:
                     logger.error(f"Failed to score job {job.id}: {e}")
-                    
+
         except Exception as e:
             logger.error(f"AI matching failed: {e}")
     

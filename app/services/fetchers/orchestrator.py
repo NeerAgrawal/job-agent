@@ -53,13 +53,9 @@ class FetcherOrchestrator:
 
         # Primary lightweight fetchers
         self.fetchers = {
-            "greenhouse": GreenhouseFetcher(
-                company_boards=[
-                    "stripe",
-                    "airbnb",
-                    "postman"
-                ]
-            ),
+            # No explicit company_boards override: use GreenhouseFetcher's own
+            # curated default list (PM-focused companies with working boards).
+            "greenhouse": GreenhouseFetcher(),
             "lever": LeverFetcher(),
             "wellfound": WellfoundFetcher(),
             "remotely": RemotelyFetcher(),
@@ -127,8 +123,10 @@ class FetcherOrchestrator:
                 if result["success"]:
                     all_jobs.extend(result["jobs"])
 
+            policy_filtered_jobs = self._enforce_location_policy(all_jobs)
+
             filtered_jobs = self._filter_jobs(
-                all_jobs,
+                policy_filtered_jobs,
                 filters
             )
 
@@ -136,8 +134,8 @@ class FetcherOrchestrator:
                 filtered_jobs
             )
 
-            saved_count = await self.save_all_jobs(all_jobs)
-            
+            saved_count = await self.save_all_jobs(unique_jobs)
+
             summary = {
                 "timestamp": datetime.utcnow().isoformat(),
                 "total_sources": len(self.fetchers),
@@ -146,7 +144,7 @@ class FetcherOrchestrator:
                     if r["success"]
                 ]),
                 "total_jobs_fetched": len(all_jobs),
-                "jobs_after_filtering": len(all_jobs),
+                "jobs_after_filtering": len(filtered_jobs),
                 "unique_jobs": len(unique_jobs),
                 "saved_count": saved_count,
                 "source_results": fetch_results,
@@ -531,17 +529,45 @@ class FetcherOrchestrator:
                 f"{len(filtered_jobs)} jobs"
             )
 
-        # Enforce remote status for international jobs
-        # "instahyre", "cutshort", "naukri" are Indian (Pan India allowed)
-        # All others must be Remote
-        indian_sources = {"instahyre", "cutshort", "naukri"}
+        return filtered_jobs
+
+    # Source names (including their browser-fallback variants) that serve India-based
+    # postings, where onsite/hybrid/remote are all in scope. Everything else is treated
+    # as an international source, where only remote roles are in scope.
+    INDIAN_SOURCES = {"instahyre", "cutshort", "naukri", "career_pages"}
+
+    def _enforce_location_policy(
+        self,
+        jobs: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Apply the India (any work mode) vs international (remote-only) policy.
+
+        Unlike the optional filters in `_filter_jobs`, this always runs regardless of
+        whether the caller passed a `filters` dict, since it's a standing business rule
+        rather than an ad-hoc query filter.
+        """
+
         final_filtered_jobs = []
-        for job in filtered_jobs:
-            source = job.source.lower() if hasattr(job, 'source') else job.get('source', '').lower()
-            remote_status = job.remote_status.lower() if hasattr(job, 'remote_status') and job.remote_status else job.get('remote_status', '').lower()
-            if source in indian_sources or remote_status == "remote":
+
+        for job in jobs:
+            source = job.source if hasattr(job, 'source') else job.get('source', '')
+            source = (source or "").lower()
+            if source.endswith("_browser"):
+                source = source[: -len("_browser")]
+
+            remote_status = job.remote_status if hasattr(job, 'remote_status') else job.get('remote_status', '')
+            remote_status = (remote_status or "").lower()
+
+            is_indian_source = source in self.INDIAN_SOURCES
+
+            if is_indian_source or remote_status == "remote":
                 final_filtered_jobs.append(job)
-                
+
+        self.logger.info(
+            f"Location policy filtering (India: any mode, international: remote-only) "
+            f"reduced {len(jobs)} -> {len(final_filtered_jobs)} jobs"
+        )
+
         return final_filtered_jobs
 
     def _deduplicate_jobs(

@@ -85,15 +85,14 @@ class RemotelyFetcher(BaseFetcher):
         jobs: List[JobCreate],
         filters: Optional[Dict[str, Any]]
     ) -> List[JobCreate]:
-        """Apply optional filters."""
+        """Apply optional filters. Remotely is an international source, so remote-only
+        enforcement always applies regardless of whether other filters are provided."""
+
+        filtered_jobs = [j for j in jobs if j.remote_status.lower() == "remote"]
+
         if not filters:
-            return jobs
-            
-        filtered_jobs = jobs
-        
-        # Enforce remote status ALWAYS for international jobs
-        filtered_jobs = [j for j in filtered_jobs if j.remote_status.lower() == "remote"]
-        
+            return filtered_jobs
+
         if filters.get("search"):
             search_term = filters["search"].lower()
             filtered_jobs = [

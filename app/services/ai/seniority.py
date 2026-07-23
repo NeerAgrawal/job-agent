@@ -92,7 +92,7 @@ class SeniorityDetector:
             return SeniorityLevel.ASSOCIATE
         
         # Junior level detection
-        if any(keyword in title_lower for keyword in keyword in [
+        if any(keyword in title_lower for keyword in [
             'junior', 'jr.', 'jr ', 'entry'
         ]):
             return SeniorityLevel.JUNIOR
