@@ -60,19 +60,24 @@ class FetcherOrchestrator:
             "wellfound": WellfoundFetcher(),
             "remotely": RemotelyFetcher(),
             "career_pages": CareerPagesFetcher(),
-            "instahyre": InstahyreFetcher(),
             "cutshort": CutshortFetcher(),
-            "naukri": NaukriFetcher()
+            "naukri": NaukriFetcher(),
+            # Instahyre disabled: its public feed is login-gated and the browser
+            # path currently runs an auth-skip stub that yields a generic,
+            # non-searchable feed (~0 usable jobs for ~38s/run). Re-enable here and
+            # in browser_fetchers below once the one-time login automation is set up.
+            # "instahyre": InstahyreFetcher(),
         }
 
         # Optional browser fetchers for fallback
         self.browser_fetchers = {}
         if BROWSER_FETCHERS_AVAILABLE:
             self.browser_fetchers = {
-                "instahyre_browser": InstahyreBrowserFetcher(),
                 "cutshort_browser": CutshortBrowserFetcher(),
                 "naukri_browser": NaukriBrowserFetcher(),
-                "wellfound_browser": WellfoundBrowserFetcher()
+                "wellfound_browser": WellfoundBrowserFetcher(),
+                # Disabled alongside the primary Instahyre fetcher (see above).
+                # "instahyre_browser": InstahyreBrowserFetcher(),
             }
 
         # bounded concurrency
