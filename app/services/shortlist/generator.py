@@ -95,12 +95,20 @@ class ShortlistGenerator:
             result = await session.execute(stmt)
             jobs = result.scalars().all()
             
-            # Filter by PM relevance and URL validity
+            # Filter by PM relevance, URL validity, and recruiter-repost quality.
+            # The repost check runs here too (not just at fetch time) so reposts
+            # already saved from earlier runs are still kept out of delivery.
+            from app.services.source_intelligence.quality_filter import is_recruiter_repost
+
             fresh_jobs = []
             for job in jobs:
-                if self._is_pm_relevant(job) and repo.validate_job_url(job.job_url):
-                    fresh_jobs.append(job)
-            
+                if not (self._is_pm_relevant(job) and repo.validate_job_url(job.job_url)):
+                    continue
+                is_repost, _ = is_recruiter_repost(job.company, job.jd_text)
+                if is_repost:
+                    continue
+                fresh_jobs.append(job)
+
             logger.info(f"Found {len(fresh_jobs)} fresh PM jobs")
             return fresh_jobs
     

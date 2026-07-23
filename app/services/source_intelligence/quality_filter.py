@@ -36,12 +36,20 @@ _PLACEHOLDER_COMPANIES = {
 # agencies rather than product employers. (Deliberately excludes bare
 # "consulting"/"consultancy" and "solutions", which many real employers use.)
 _STAFFING_NAME_KEYWORDS = [
-    "staffing", "recruit", "manpower", "placement", "placements",
+    "staffing", "staffnix", "recruit", "manpower", "placement", "placements",
     "hr services", "hr solutions", "hiring solutions", "talent solutions",
     "talent acquisition", "workforce", "hr consult", "job consultant",
     "job consultants", "resourcing", "stafftech", "skillstaffing",
     "hr consulting",
 ]
+
+# Company fields that are really a JD description phrase leaked into the company
+# name (common on Cutshort reposts, e.g. "this is a BFSI / FINTECH company",
+# "AI-first marketing company") -- these aren't a real, verifiable employer.
+_DESCRIPTION_AS_COMPANY_PREFIXES = (
+    "this is a", "this is an", "we are a", "we are an", "a leading",
+    "an leading", "our company is", "one of the", "leading ",
+)
 # Note: bare "consultancy"/"consulting"/"consultancy services" are intentionally
 # NOT flagged -- many legitimate employers use them (e.g. Tata Consultancy
 # Services, Capco). The keywords above target dedicated staffing/recruitment firms.
@@ -69,5 +77,9 @@ def is_recruiter_repost(company: Optional[str], jd_text: Optional[str] = "") -> 
     for keyword in _STAFFING_NAME_KEYWORDS:
         if keyword in name:
             return True, f"staffing_name:{keyword}"
+
+    # 5. A JD description phrase sitting in the company field (no real employer)
+    if name.startswith(_DESCRIPTION_AS_COMPANY_PREFIXES):
+        return True, "description_as_company"
 
     return False, ""
