@@ -370,14 +370,25 @@ class DailyScheduler:
             
             # Filter out already delivered jobs
             undelivered_jobs = await self.delivery_tracker.filter_undelivered_jobs(jobs)
-            
+
             if not undelivered_jobs:
                 self.logger.info("No new jobs to deliver")
                 stats["steps_completed"].append("telegram")
                 return
-            
+
+            # Verify link liveness on the delivery candidates (plus a small buffer to
+            # backfill any confirmed-dead ones) so we never deliver an expired posting.
+            from app.services.automation.link_verifier import filter_live_jobs
+            candidates = undelivered_jobs[: self.config.max_jobs_per_day + 5]
+            live_candidates = await filter_live_jobs(candidates)
+
             # Limit to max jobs per day
-            jobs_to_deliver = undelivered_jobs[:self.config.max_jobs_per_day]
+            jobs_to_deliver = live_candidates[:self.config.max_jobs_per_day]
+
+            if not jobs_to_deliver:
+                self.logger.info("No live jobs to deliver after link verification")
+                stats["steps_completed"].append("telegram")
+                return
             
             # Format digest
             summary_stats = {
