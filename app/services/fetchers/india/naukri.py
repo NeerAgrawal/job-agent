@@ -56,8 +56,6 @@ class NaukriFetcher(BaseIndiaFetcher):
             )
 
             response.raise_for_status()
-            with open("naukri_debug.html", "w", encoding="utf-8") as f:
-                f.write(response.text)
 
             soup = BeautifulSoup(
                 response.text,
