@@ -28,13 +28,52 @@ class CutshortFetcher(BaseIndiaFetcher):
             name="cutshort",
             base_url="https://cutshort.io"
         )
+        # Cutshort routes role searches by slug. Only these two slugs reliably
+        # return Cutshort's standard job-list JSON (associate-pm / tpm /
+        # product-analyst slugs do not resolve to category pages on Cutshort).
+        self.role_search_urls = [
+            "https://cutshort.io/jobs/product-manager-jobs",
+            "https://cutshort.io/jobs/product-owner-jobs",
+        ]
 
     async def _fetch_from_source(
         self,
         client: httpx.AsyncClient,
         limit: int
     ) -> List[Dict[str, Any]]:
-        """Fetch jobs from Cutshort."""
+        """Fetch across the target-role search URLs, distributing the limit and
+        de-duplicating by job URL."""
+        all_jobs: List[Dict[str, Any]] = []
+        seen = set()
+
+        num_roles = len(self.role_search_urls)
+        per_url = max(3, -(-limit // num_roles))  # ceil division, min 3 per role
+
+        for url in self.role_search_urls:
+            if len(all_jobs) >= limit:
+                break
+            role_jobs = await self._fetch_role_url(url, per_url)
+            for job in role_jobs:
+                key = job.get('job_url') or (job.get('title'), job.get('company'))
+                if key in seen:
+                    continue
+                seen.add(key)
+                all_jobs.append(job)
+                if len(all_jobs) >= limit:
+                    break
+
+        self.logger.info(
+            f"Cutshort multi-role fetch: {len(all_jobs)} unique jobs "
+            f"across {num_roles} role searches"
+        )
+        return all_jobs
+
+    async def _fetch_role_url(
+        self,
+        search_url: str,
+        limit: int
+    ) -> List[Dict[str, Any]]:
+        """Fetch and parse a single Cutshort role-search URL."""
 
         try:
 
@@ -53,10 +92,6 @@ class CutshortFetcher(BaseIndiaFetcher):
                 "Referer": "https://www.google.com/",
                 "Connection": "keep-alive",
             }
-
-            search_url = (
-                "https://cutshort.io/jobs/product-manager-jobs"
-            )
 
             transport = httpx.AsyncHTTPTransport(
                 retries=2
@@ -77,13 +112,11 @@ class CutshortFetcher(BaseIndiaFetcher):
 
             self.logger.info(
                 f"Cutshort response status: "
-                f"{response.status_code}"
+                f"{response.status_code} for {search_url}"
             )
 
             response.raise_for_status()
-            with open("cutshort_debug.html", "w", encoding="utf-8") as f:
-                f.write(response.text)
-            
+
             soup = BeautifulSoup(
                 response.text,
                 "html.parser"
