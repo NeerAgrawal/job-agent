@@ -67,8 +67,8 @@ class Settings(BaseSettings):
     wellfound_session_file: str = Field(default="sessions/wellfound_session.json", env="WELLFOUND_SESSION_FILE")
     
     # Job Automation
-    max_jobs_per_day: int = Field(default=10, env="MAX_JOBS_PER_DAY")
-    min_score_threshold: float = Field(default=45.0, env="MIN_SCORE_THRESHOLD")
+    max_jobs_per_day: int = Field(default=50, env="MAX_JOBS_PER_DAY")
+    min_score_threshold: float = Field(default=60.0, env="MIN_SCORE_THRESHOLD")
     
     class Config:
         env_file = ".env"

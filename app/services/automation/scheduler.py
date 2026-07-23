@@ -24,8 +24,8 @@ class AutomationConfig:
     enabled: bool = True
     delivery_hour: int = 9  # 9 AM
     delivery_timezone: str = "UTC"
-    max_jobs_per_day: int = 10
-    min_score_threshold: float = 45.0
+    max_jobs_per_day: int = 50
+    min_score_threshold: float = 60.0
     telegram_enabled: bool = True
     cleanup_enabled: bool = True
     fetch_enabled: bool = True
@@ -53,8 +53,8 @@ class DailyScheduler:
             enabled=os.getenv("AUTOMATION_ENABLED", "true").lower() == "true",
             delivery_hour=int(os.getenv("DELIVERY_HOUR", "9")),
             delivery_timezone=os.getenv("DELIVERY_TIMEZONE", "UTC"),
-            max_jobs_per_day=int(os.getenv("MAX_JOBS_PER_DAY", "10")),
-            min_score_threshold=float(os.getenv("MIN_SCORE_THRESHOLD", "45.0")),
+            max_jobs_per_day=int(os.getenv("MAX_JOBS_PER_DAY", "50")),
+            min_score_threshold=float(os.getenv("MIN_SCORE_THRESHOLD", "60.0")),
             telegram_enabled=os.getenv("TELEGRAM_ENABLED", "true").lower() == "true",
             cleanup_enabled=os.getenv("CLEANUP_ENABLED", "true").lower() == "true",
             fetch_enabled=os.getenv("FETCH_ENABLED", "true").lower() == "true",
@@ -216,8 +216,10 @@ class DailyScheduler:
             async with get_db_session() as session:
                 repo = JobRepository(session)
                 
-                # 1. Fetch up to 50 unscored jobs from DB
-                stmt = select(Job).where(Job.final_score.is_(None)).limit(50)
+                # 1. Fetch unscored jobs from DB. Cap high enough to score an
+                # entire fetch run so nothing is left unscored (and therefore
+                # excluded from the shortlist) just because of a low batch cap.
+                stmt = select(Job).where(Job.final_score.is_(None)).limit(300)
                 result = await session.execute(stmt)
                 unscored_jobs = result.scalars().all()
                 

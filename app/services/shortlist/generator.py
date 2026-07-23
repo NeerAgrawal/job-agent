@@ -9,21 +9,24 @@ from app.database.session import get_db_session
 from app.models.job import Job
 from app.repositories.job import JobRepository
 from app.services.ai.title_filters import get_title_category
+from app.core.config import settings
 from app.core.logging import logger
 
 
 class ShortlistGenerator:
     """Generates daily PM job shortlists."""
-    
+
     def __init__(self):
-        self.minimum_final_score = 45.0
-        self.max_shortlist_size = 10
+        # Quality bar for "meaningful" jobs, driven by a single setting
+        # (MIN_SCORE_THRESHOLD) so it can be tuned without code changes.
+        self.minimum_final_score = settings.min_score_threshold
+        self.max_shortlist_size = 100
         self.max_job_age_days = 7
-        
+
     async def generate_daily_shortlist(
         self,
         resume_path: Optional[str] = None,
-        limit: int = 10
+        limit: int = 100
     ) -> Dict[str, Any]:
         """Generate daily PM job shortlist.
         
