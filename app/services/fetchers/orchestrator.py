@@ -16,6 +16,7 @@ from app.services.source_intelligence import (
     SourceAnalytics,
     FetchEfficiencyAnalyzer
 )
+from app.services.source_intelligence.quality_filter import is_recruiter_repost
 
 # Browser automation imports (optional)
 try:
@@ -130,8 +131,10 @@ class FetcherOrchestrator:
 
             policy_filtered_jobs = self._enforce_location_policy(all_jobs)
 
+            quality_filtered_jobs = self._filter_recruiter_reposts(policy_filtered_jobs)
+
             filtered_jobs = self._filter_jobs(
-                policy_filtered_jobs,
+                quality_filtered_jobs,
                 filters
             )
 
@@ -574,6 +577,35 @@ class FetcherOrchestrator:
         )
 
         return final_filtered_jobs
+
+    def _filter_recruiter_reposts(
+        self,
+        jobs: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Drop obvious staffing-agency / recruiter reposts (not the employer's
+        own application channel), which are common noise on India job boards."""
+
+        kept = []
+        dropped = 0
+
+        for job in jobs:
+            company = job.company if hasattr(job, 'company') else job.get('company', '')
+            jd_text = job.jd_text if hasattr(job, 'jd_text') else job.get('jd_text', '')
+
+            is_repost, reason = is_recruiter_repost(company, jd_text)
+            if is_repost:
+                dropped += 1
+                self.logger.debug(f"Dropped recruiter repost ({reason}): {company}")
+            else:
+                kept.append(job)
+
+        if dropped:
+            self.logger.info(
+                f"Recruiter-repost filtering reduced {len(jobs)} -> {len(kept)} jobs "
+                f"({dropped} staffing/repost listings dropped)"
+            )
+
+        return kept
 
     def _deduplicate_jobs(
         self,
