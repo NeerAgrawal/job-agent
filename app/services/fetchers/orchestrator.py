@@ -8,6 +8,8 @@ from app.services.fetchers.greenhouse import GreenhouseFetcher
 from app.services.fetchers.lever import LeverFetcher
 from app.services.fetchers.wellfound import WellfoundFetcher
 from app.services.fetchers.india import InstahyreFetcher, CutshortFetcher, NaukriFetcher
+from app.services.fetchers.remotely import RemotelyFetcher
+from app.services.fetchers.career_pages import CareerPagesFetcher
 from app.services.source_intelligence import (
     SourceHealthTracker,
     PMRolePreFilter,
@@ -23,6 +25,7 @@ try:
         CutshortBrowserFetcher,
         BrowserHealthTracker
     )
+    from app.services.fetchers.browser.wellfound_browser import WellfoundBrowserFetcher
     BROWSER_FETCHERS_AVAILABLE = True
 except ImportError:
     BROWSER_FETCHERS_AVAILABLE = False
@@ -59,6 +62,8 @@ class FetcherOrchestrator:
             ),
             "lever": LeverFetcher(),
             "wellfound": WellfoundFetcher(),
+            "remotely": RemotelyFetcher(),
+            "career_pages": CareerPagesFetcher(),
             "instahyre": InstahyreFetcher(),
             "cutshort": CutshortFetcher(),
             "naukri": NaukriFetcher()
@@ -70,7 +75,8 @@ class FetcherOrchestrator:
             self.browser_fetchers = {
                 "instahyre_browser": InstahyreBrowserFetcher(),
                 "cutshort_browser": CutshortBrowserFetcher(),
-                "naukri_browser": NaukriBrowserFetcher()
+                "naukri_browser": NaukriBrowserFetcher(),
+                "wellfound_browser": WellfoundBrowserFetcher()
             }
 
         # bounded concurrency
@@ -307,7 +313,8 @@ class FetcherOrchestrator:
             browser_source_map = {
                 "instahyre": "instahyre_browser",
                 "cutshort": "cutshort_browser", 
-                "naukri": "naukri_browser"
+                "naukri": "naukri_browser",
+                "wellfound": "wellfound_browser"
             }
             
             browser_source_name = browser_source_map.get(source_name)
@@ -524,7 +531,18 @@ class FetcherOrchestrator:
                 f"{len(filtered_jobs)} jobs"
             )
 
-        return filtered_jobs
+        # Enforce remote status for international jobs
+        # "instahyre", "cutshort", "naukri" are Indian (Pan India allowed)
+        # All others must be Remote
+        indian_sources = {"instahyre", "cutshort", "naukri"}
+        final_filtered_jobs = []
+        for job in filtered_jobs:
+            source = job.source.lower() if hasattr(job, 'source') else job.get('source', '').lower()
+            remote_status = job.remote_status.lower() if hasattr(job, 'remote_status') and job.remote_status else job.get('remote_status', '').lower()
+            if source in indian_sources or remote_status == "remote":
+                final_filtered_jobs.append(job)
+                
+        return final_filtered_jobs
 
     def _deduplicate_jobs(
         self,

@@ -361,7 +361,7 @@ class DailyScheduler:
             return []
     
     async def _run_telegram_delivery(self, jobs: List[Dict[str, Any]], stats: Dict[str, Any]) -> None:
-        """Run Telegram delivery."""
+        """Run Telegram delivery and attach tailored resumes."""
         try:
             if not self.telegram_service.is_enabled():
                 self.logger.warning("Telegram service not configured")
@@ -389,12 +389,35 @@ class DailyScheduler:
             
             digest_text = self.digest_formatter.format_daily_digest(jobs_to_deliver, summary_stats)
             
-            # Send to Telegram
+            # Send the main digest to Telegram
             success = await self.telegram_service.send_long_message(digest_text)
             
             if success:
-                # Mark jobs as delivered
+                # Import Resume Intelligence Engine
+                from app.services.ai.resume_intelligence import ResumeIntelligenceEngine
+                resume_engine = ResumeIntelligenceEngine()
+                
+                # Mark jobs as delivered and send customized PDF if score > 80
                 for job in jobs_to_deliver:
+                    job_id = str(job.get("id", job.get("job_id", "unknown")))
+                    final_score = job.get("final_score", 0)
+                    
+                    if final_score >= 80:
+                        self.logger.info(f"High-scoring job detected ({final_score}). Generating tailored resume for {job.get('company')}...")
+                        pdf_path = await resume_engine.generate_tailored_resume(
+                            job_title=job.get("title", ""),
+                            company=job.get("company", ""),
+                            jd_text=job.get("jd_text", ""),
+                            job_id=job_id
+                        )
+                        
+                        if pdf_path:
+                            caption = f"🚀 Tailored Resume Ready!\n*{job.get('title')}* at *{job.get('company')}*\nScore: {final_score:.1f}"
+                            await self.telegram_service.send_document(
+                                text=caption, 
+                                document_path=pdf_path
+                            )
+                            
                     await self.delivery_tracker.mark_job_delivered(
                         job_url=job.get("job_url", ""),
                         delivery_method="telegram",

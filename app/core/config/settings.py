@@ -35,6 +35,8 @@ class Settings(BaseSettings):
     # AI Configuration
     openai_api_key: Optional[str] = Field(default=None, env="OPENAI_API_KEY")
     ai_model: str = Field(default="gpt-3.5-turbo", env="AI_MODEL")
+    groq_api_key: Optional[str] = Field(default=None, env="GROQ_API_KEY")
+    groq_model: str = Field(default="llama-3.3-70b-versatile", env="GROQ_MODEL")
     
     # Job Fetching
     fetch_interval_hours: int = Field(default=6, env="FETCH_INTERVAL_HOURS")
@@ -58,6 +60,11 @@ class Settings(BaseSettings):
     # Playwright (Future)
     playwright_headless: bool = Field(default=True, env="PLAYWRIGHT_HEADLESS")
     playwright_timeout: int = Field(default=30000, env="PLAYWRIGHT_TIMEOUT")
+
+    # Wellfound Authentication
+    wellfound_email: Optional[str] = Field(default=None, env="WELLFOUND_EMAIL")
+    wellfound_password: Optional[str] = Field(default=None, env="WELLFOUND_PASSWORD")
+    wellfound_session_file: str = Field(default="sessions/wellfound_session.json", env="WELLFOUND_SESSION_FILE")
     
     # Job Automation
     max_jobs_per_day: int = Field(default=10, env="MAX_JOBS_PER_DAY")

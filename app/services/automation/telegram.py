@@ -6,6 +6,8 @@ from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
 
 import aiohttp
+from aiohttp import FormData
+import os
 from app.core.logging import logger
 from app.core.config.settings import settings
 
@@ -69,6 +71,43 @@ class TelegramService:
                     continue
         
         self.logger.error("Failed to send Telegram message after all retries")
+        return False
+        
+    async def send_document(self, text: str, document_path: str, parse_mode: str = "Markdown") -> bool:
+        """Send a message with a document attachment to Telegram."""
+        if not self.enabled:
+            return False
+            
+        if not os.path.exists(document_path):
+            self.logger.error(f"Document not found at {document_path}")
+            return False
+            
+        for attempt in range(self.retry_attempts):
+            try:
+                async with aiohttp.ClientSession() as session:
+                    url = f"{self.api_url}/sendDocument"
+                    data = FormData()
+                    data.add_field('chat_id', str(self.chat_id))
+                    data.add_field('caption', text)
+                    data.add_field('parse_mode', parse_mode)
+                    
+                    with open(document_path, 'rb') as f:
+                        data.add_field('document', f, filename=os.path.basename(document_path))
+                        
+                        async with session.post(url, data=data) as response:
+                            if response.status == 200:
+                                result = await response.json()
+                                self.logger.info(f"Telegram document sent successfully: {result.get('message_id', 'unknown')}")
+                                return True
+                            else:
+                                error_text = await response.text()
+                                self.logger.error(f"Telegram API document error (attempt {attempt + 1}): {response.status} - {error_text}")
+                                
+            except Exception as e:
+                self.logger.error(f"Telegram document send error (attempt {attempt + 1}): {e}")
+                if attempt < self.retry_attempts - 1:
+                    await asyncio.sleep(self.retry_delay)
+                    
         return False
     
     async def send_long_message(self, text: str, parse_mode: str = "Markdown") -> bool:
