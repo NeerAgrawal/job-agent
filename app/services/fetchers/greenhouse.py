@@ -9,6 +9,7 @@ import httpx
 from app.services.fetchers.base import BaseFetcher
 from app.schemas.job import JobCreate
 from app.core.logging import logger
+from app.services.ai.title_filters import is_pm_role, is_reject_role
 
 
 class GreenhouseFetcher(BaseFetcher):
@@ -25,24 +26,22 @@ class GreenhouseFetcher(BaseFetcher):
         )
 
         self.company_boards = company_boards or [
-            # High-quality PM-focused companies with strong technical products
+            # Live Greenhouse boards with real PM-role yield (verified against the
+            # boards-api). Ordered roughly by observed PM density.
             "stripe",
-            "postman",
             "datadog",
-            "plaid",
+            "figma",
+            "asana",
+            "airbnb",
             "mongodb",
-            "mixpanel",
-            "atlassian",
-            "segment",
             "cloudflare",
+            "mixpanel",
+            "postman",
+            "gitlab",
             "vercel",
             "webflow",
-            "figma",
-            "zapier",
-            # Removed: notion (broken board), openai (broken board)
-            # Removed: airbnb, discord, coinbase, olark, reddit, robinhood
-            # Removed: block, nubank, mercury, affirm, brex, ramp, deel
-            # Removed: gusto, justworks, rippling, benchling (non-PM focused)
+            # Removed (board 404s on boards-api): plaid, atlassian, segment,
+            # zapier, notion, ramp, razorpay, openai
         ]
 
         self.rate_limiter = asyncio.Semaphore(10)
@@ -199,12 +198,21 @@ class GreenhouseFetcher(BaseFetcher):
         jobs: List[JobCreate],
         filters: Optional[Dict[str, Any]]
     ) -> List[JobCreate]:
-        """Apply optional filters."""
+        """Apply target-role filtering plus any optional filters.
+
+        PM-role filtering always runs first (and before the caller's `[:limit]`
+        slice), otherwise slicing the first N of a company's full job list -- which
+        is mostly engineering roles -- yields ~0 target roles.
+        """
+
+        # Always restrict to target product roles first
+        filtered_jobs = [
+            job for job in jobs
+            if is_pm_role(job.title) and not is_reject_role(job.title)
+        ]
 
         if not filters:
-            return jobs
-
-        filtered_jobs = jobs
+            return filtered_jobs
 
         # Search filter
         if filters.get("search"):
@@ -271,6 +279,12 @@ class GreenhouseFetcher(BaseFetcher):
                 )
             else:
                 location = str(location_data)
+
+            # Some Greenhouse postings list many cities in one string (often the
+            # remote-eligible ones). Cap to the Job.location column limit (200)
+            # so they pass validation instead of being dropped entirely.
+            if location and len(location) > 200:
+                location = location[:197].rstrip(", ") + "..."
 
             metadata = job_data.get(
                 "metadata",
