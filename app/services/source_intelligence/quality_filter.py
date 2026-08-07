@@ -54,6 +54,30 @@ _DESCRIPTION_AS_COMPANY_PREFIXES = (
 # NOT flagged -- many legitimate employers use them (e.g. Tata Consultancy
 # Services, Capco). The keywords above target dedicated staffing/recruitment firms.
 
+# A structural signal for the same description-leaked-into-company-name problem,
+# for phrasings the fixed prefix list above doesn't happen to start with (e.g.
+# "AI-first marketing company building for global-clients"). Real employer names
+# are almost never long, multi-word phrases containing the bare word
+# "company"/"companies" -- that combination reads as a JD sentence fragment, not
+# a proper noun. Word-count is a deliberately low bar (5+) since short, real
+# names like "XYZ Company Ltd" would otherwise false-positive.
+_MIN_WORDS_FOR_DESCRIPTION_LEAK = 5
+
+
+def is_india_eligible_remote(location: Optional[str], jd_text: Optional[str] = "") -> bool:
+    """Return True if an international-source "remote" job is actually open to
+    India-based candidates.
+
+    A bare `remote_status == "remote"` flag is not enough: many Greenhouse/Lever
+    postings say "Remote-US", "Remote - Canada", or list only US/EU cities with no
+    India eligibility at all. Per the standing policy (international roles are
+    only in scope if they explicitly accept India-based candidates), this
+    requires an explicit "India" mention in the location or JD text -- a role
+    that's silent on India isn't assumed to be open to it.
+    """
+    text = f"{location or ''} {jd_text or ''}".lower()
+    return "india" in text
+
 
 def is_recruiter_repost(company: Optional[str], jd_text: Optional[str] = "") -> Tuple[bool, str]:
     """Return (is_repost, reason). Conservative: only flags clear signals."""
@@ -81,5 +105,15 @@ def is_recruiter_repost(company: Optional[str], jd_text: Optional[str] = "") -> 
     # 5. A JD description phrase sitting in the company field (no real employer)
     if name.startswith(_DESCRIPTION_AS_COMPANY_PREFIXES):
         return True, "description_as_company"
+
+    # 5b. Same problem, caught structurally: a long, multi-word name containing
+    # the bare word "company"/"companies" reads as a JD sentence fragment
+    # rather than a proper-noun employer (e.g. "AI-first marketing company
+    # building for global-clients").
+    tokens = name.split()
+    if len(tokens) >= _MIN_WORDS_FOR_DESCRIPTION_LEAK and (
+        "company" in tokens or "companies" in tokens
+    ):
+        return True, "description_as_company_structural"
 
     return False, ""

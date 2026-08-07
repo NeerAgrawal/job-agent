@@ -16,7 +16,7 @@ from app.services.source_intelligence import (
     SourceAnalytics,
     FetchEfficiencyAnalyzer
 )
-from app.services.source_intelligence.quality_filter import is_recruiter_repost
+from app.services.source_intelligence.quality_filter import is_recruiter_repost, is_india_eligible_remote
 
 # Browser automation imports (optional)
 try:
@@ -83,7 +83,10 @@ class FetcherOrchestrator:
 
         # bounded concurrency
         self.semaphore = asyncio.Semaphore(3)
-        self.browser_semaphore = asyncio.Semaphore(2)  # Limit browser concurrency
+        # Windows + Playwright: concurrent browser contexts have shown resource
+        # contention that hangs indefinitely (subprocess cleanup errors even in
+        # single-fetcher runs). Serialize browser fetches until that's root-caused.
+        self.browser_semaphore = asyncio.Semaphore(1)  # Limit browser concurrency
 
     async def fetch_from_all_sources(
         self,
@@ -568,7 +571,19 @@ class FetcherOrchestrator:
 
             is_indian_source = source in self.INDIAN_SOURCES
 
-            if is_indian_source or remote_status == "remote":
+            if is_indian_source:
+                final_filtered_jobs.append(job)
+                continue
+
+            if remote_status != "remote":
+                continue
+
+            # A bare "remote" flag on an international source isn't enough --
+            # e.g. Greenhouse/Lever postings tagged remote but scoped to
+            # "Remote-US"/"Remote-Canada" with no India eligibility at all.
+            location = job.location if hasattr(job, 'location') else job.get('location', '')
+            jd_text = job.jd_text if hasattr(job, 'jd_text') else job.get('jd_text', '')
+            if is_india_eligible_remote(location, jd_text):
                 final_filtered_jobs.append(job)
 
         self.logger.info(

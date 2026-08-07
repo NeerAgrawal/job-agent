@@ -9,6 +9,7 @@ from app.database.session import get_db_session
 from app.models.job import Job
 from app.repositories.job import JobRepository
 from app.services.ai.title_filters import get_title_category
+from app.services.fetchers.orchestrator import FetcherOrchestrator
 from app.core.config import settings
 from app.core.logging import logger
 
@@ -95,10 +96,15 @@ class ShortlistGenerator:
             result = await session.execute(stmt)
             jobs = result.scalars().all()
             
-            # Filter by PM relevance, URL validity, and recruiter-repost quality.
-            # The repost check runs here too (not just at fetch time) so reposts
-            # already saved from earlier runs are still kept out of delivery.
-            from app.services.source_intelligence.quality_filter import is_recruiter_repost
+            # Filter by PM relevance, URL validity, recruiter-repost quality, and
+            # the India (any mode) / international (remote-only) location policy.
+            # These checks run here too (not just at fetch time) so jobs that
+            # were already saved from an earlier run -- before a filter existed,
+            # or that slipped through a fetch-time gap -- are still kept out of
+            # delivery rather than leaking forever.
+            from app.services.source_intelligence.quality_filter import is_recruiter_repost, is_india_eligible_remote
+
+            indian_sources = FetcherOrchestrator.INDIAN_SOURCES
 
             fresh_jobs = []
             for job in jobs:
@@ -107,6 +113,19 @@ class ShortlistGenerator:
                 is_repost, _ = is_recruiter_repost(job.company, job.jd_text)
                 if is_repost:
                     continue
+                source = (job.source or "").lower()
+                if source.endswith("_browser"):
+                    source = source[: -len("_browser")]
+                is_indian_source = source in indian_sources
+                remote_status = (job.remote_status or "").lower()
+                if not is_indian_source:
+                    if remote_status != "remote":
+                        continue
+                    # A bare "remote" flag isn't enough for an international
+                    # source -- confirm it's explicitly India-eligible, not
+                    # just "Remote-US"/"Remote-Canada" with no India mention.
+                    if not is_india_eligible_remote(job.location, job.jd_text):
+                        continue
                 fresh_jobs.append(job)
 
             logger.info(f"Found {len(fresh_jobs)} fresh PM jobs")
