@@ -2,14 +2,32 @@
 """Telegram bot service for daily job digest delivery."""
 
 import asyncio
+import ssl
 from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
 
 import aiohttp
+import certifi
 from aiohttp import FormData
 import os
 from app.core.logging import logger
 from app.core.config.settings import settings
+
+
+def _certifi_ssl_context() -> ssl.SSLContext:
+    """Build an SSL context backed by certifi's CA bundle.
+
+    aiohttp validates against the OS trust store by default. On Windows that
+    store is populated lazily -- a freshly installed machine can be missing
+    common roots (e.g. the GoDaddy root that api.telegram.org chains to), which
+    surfaces as a confusing "self-signed certificate in certificate chain"
+    error even though the server's certificate is perfectly valid.
+
+    Every other HTTP client in this project uses httpx, which already defaults
+    to certifi. Pinning aiohttp to the same bundle keeps TLS behaviour identical
+    across the codebase and independent of how mature the host's trust store is.
+    """
+    return ssl.create_default_context(cafile=certifi.where())
 
 
 @dataclass
@@ -32,6 +50,13 @@ class TelegramService:
         self.max_message_length = 4096  # Telegram message limit
         self.retry_attempts = 3
         self.retry_delay = 2  # seconds
+        self._ssl_context = _certifi_ssl_context()
+
+    def _session(self) -> aiohttp.ClientSession:
+        """Create a session that validates TLS against certifi's CA bundle."""
+        return aiohttp.ClientSession(
+            connector=aiohttp.TCPConnector(ssl=self._ssl_context)
+        )
         
     def is_enabled(self) -> bool:
         """Check if Telegram service is properly configured."""
@@ -45,7 +70,7 @@ class TelegramService:
         
         for attempt in range(self.retry_attempts):
             try:
-                async with aiohttp.ClientSession() as session:
+                async with self._session() as session:
                     url = f"{self.api_url}/sendMessage"
                     payload = {
                         "chat_id": self.chat_id,
@@ -84,7 +109,7 @@ class TelegramService:
             
         for attempt in range(self.retry_attempts):
             try:
-                async with aiohttp.ClientSession() as session:
+                async with self._session() as session:
                     url = f"{self.api_url}/sendDocument"
                     data = FormData()
                     data.add_field('chat_id', str(self.chat_id))
@@ -176,7 +201,7 @@ class TelegramService:
             return False
         
         try:
-            async with aiohttp.ClientSession() as session:
+            async with self._session() as session:
                 url = f"{self.api_url}/getMe"
                 async with session.get(url) as response:
                     if response.status == 200:
