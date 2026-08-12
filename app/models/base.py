@@ -4,7 +4,10 @@ import uuid
 from sqlalchemy import Column, String, DateTime
 from sqlalchemy.sql import func
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.dialects.postgresql import UUID
+# Dialect-agnostic UUID: renders native UUID on PostgreSQL and CHAR(32) on
+# SQLite. The postgresql-specific type cannot be compiled by the SQLite dialect,
+# which is the backend this runs on locally.
+from sqlalchemy import Uuid as UUID
 
 
 # Single authoritative Base for all models
