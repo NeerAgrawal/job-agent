@@ -103,6 +103,7 @@ class ShortlistGenerator:
             # or that slipped through a fetch-time gap -- are still kept out of
             # delivery rather than leaking forever.
             from app.services.source_intelligence.quality_filter import is_recruiter_repost, is_india_eligible_remote
+            from app.services.ai.seniority import exceeds_experience_bar
 
             indian_sources = FetcherOrchestrator.INDIAN_SOURCES
 
@@ -112,6 +113,11 @@ class ShortlistGenerator:
                     continue
                 is_repost, _ = is_recruiter_repost(job.company, job.jd_text)
                 if is_repost:
+                    continue
+                # Postings can demand far more experience than their title
+                # suggests, so this is checked on the JD body, not the title.
+                too_senior, _years = exceeds_experience_bar(job.jd_text)
+                if too_senior:
                     continue
                 source = (job.source or "").lower()
                 if source.endswith("_browser"):

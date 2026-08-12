@@ -17,6 +17,7 @@ from app.services.source_intelligence import (
     FetchEfficiencyAnalyzer
 )
 from app.services.source_intelligence.quality_filter import is_recruiter_repost, is_india_eligible_remote
+from app.services.ai.seniority import exceeds_experience_bar, MAX_YEARS_REQUIRED
 
 # Browser automation imports (optional)
 try:
@@ -135,6 +136,8 @@ class FetcherOrchestrator:
             policy_filtered_jobs = self._enforce_location_policy(all_jobs)
 
             quality_filtered_jobs = self._filter_recruiter_reposts(policy_filtered_jobs)
+
+            quality_filtered_jobs = self._filter_experience_requirements(quality_filtered_jobs)
 
             filtered_jobs = self._filter_jobs(
                 quality_filtered_jobs,
@@ -618,6 +621,41 @@ class FetcherOrchestrator:
             self.logger.info(
                 f"Recruiter-repost filtering reduced {len(jobs)} -> {len(kept)} jobs "
                 f"({dropped} staffing/repost listings dropped)"
+            )
+
+        return kept
+
+    def _filter_experience_requirements(
+        self,
+        jobs: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Drop postings demanding more experience than a career switcher has.
+
+        Title filtering cannot catch these -- a posting titled "Associate
+        Product Manager" can still demand 6 years in its body. Postings that
+        state no requirement are kept.
+        """
+
+        kept = []
+        dropped = 0
+
+        for job in jobs:
+            jd_text = job.jd_text if hasattr(job, 'jd_text') else job.get('jd_text', '')
+            title = job.title if hasattr(job, 'title') else job.get('title', '')
+
+            too_senior, years = exceeds_experience_bar(jd_text)
+            if too_senior:
+                dropped += 1
+                self.logger.debug(
+                    f"Dropped over-experienced posting ({years} yrs required): {title}"
+                )
+            else:
+                kept.append(job)
+
+        if dropped:
+            self.logger.info(
+                f"Experience filtering reduced {len(jobs)} -> {len(kept)} jobs "
+                f"({dropped} demanding more than {MAX_YEARS_REQUIRED} years)"
             )
 
         return kept

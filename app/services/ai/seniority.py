@@ -1,10 +1,83 @@
 """Seniority detection and scoring for PM transition optimization."""
 
 import re
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
 from enum import Enum
 
 from app.core.logging import logger
+
+
+# Maximum years of experience a posting may demand and still be a realistic
+# target. The profile this system serves is a QA -> Product switcher with ~0
+# years *in product*, so anything asking beyond this is screening for someone
+# who is already a PM, regardless of how junior the title sounds. Titles alone
+# cannot catch this: postings titled "Associate Product Manager" have been seen
+# demanding 6 years.
+MAX_YEARS_REQUIRED = 3
+
+# "5+ years", "5 - 7 years", "minimum 4 to 5 years", "at least 6 yrs"
+_YEARS_RANGE = re.compile(
+    r"(\d{1,2})\s*(?:\+|plus)?\s*(?:-|–|to)\s*(\d{1,2})\s*\+?\s*(?:years?|yrs?)\b",
+    re.I,
+)
+_YEARS_SINGLE = re.compile(r"(\d{1,2})\s*(?:\+|plus)?\s*(?:years?|yrs?)\b", re.I)
+
+# Contexts where a year count describes the company or the past, not a
+# requirement on the candidate ("founded 10 years ago", "over the last 5 years").
+_YEARS_NEGATIVE_CTX = re.compile(
+    r"(years?\s+ago|past\s+\d+\s+years?|last\s+\d+\s+years?|founded|"
+    r"over\s+the\s+years|\d+\s*years?\s+of\s+(?:growth|operation|history)|"
+    r"in\s+business|since)",
+    re.I,
+)
+
+
+def extract_min_years_required(text: str) -> Optional[int]:
+    """Extract the lowest credible years-of-experience demand from a JD.
+
+    Returns None when the posting states no requirement, which is common and is
+    deliberately *not* treated as disqualifying -- unstated usually means
+    flexible or junior-friendly.
+
+    For a range ("5-7 years") the floor is what actually gates an applicant, so
+    the lower bound is used.
+    """
+    if not text:
+        return None
+
+    candidates = []
+
+    for match in _YEARS_RANGE.finditer(text):
+        window = text[max(0, match.start() - 60): match.end() + 20]
+        if _YEARS_NEGATIVE_CTX.search(window):
+            continue
+        candidates.append(int(match.group(1)))
+
+    consumed = [(m.start(), m.end()) for m in _YEARS_RANGE.finditer(text)]
+    for match in _YEARS_SINGLE.finditer(text):
+        if any(start <= match.start() < end for start, end in consumed):
+            continue
+        window = text[max(0, match.start() - 60): match.end() + 20]
+        if _YEARS_NEGATIVE_CTX.search(window):
+            continue
+        candidates.append(int(match.group(1)))
+
+    credible = [c for c in candidates if 0 < c <= 25]
+    return min(credible) if credible else None
+
+
+def exceeds_experience_bar(
+    jd_text: str,
+    max_years: int = MAX_YEARS_REQUIRED,
+) -> Tuple[bool, Optional[int]]:
+    """Return (should_reject, years_required) for a job description.
+
+    Postings with no stated requirement are kept.
+    """
+    years = extract_min_years_required(jd_text)
+    if years is None:
+        return False, None
+    return years > max_years, years
 
 
 class SeniorityLevel(Enum):
@@ -25,29 +98,34 @@ class SeniorityDetector:
     
     def __init__(self):
         self.transition_target_years = 4.5  # Target experience for PM transition
-        
-        # Seniority penalties (negative scores)
+
+        # Seniority penalties (negative scores).
+        # Head-of-product / VP / group-PM titles are already classified as
+        # DIRECTOR or EXECUTIVE by detect_seniority_level, so they need no
+        # separate entries here. (They previously appeared as bare strings
+        # assigned onto the enum, which could never match a SeniorityLevel
+        # lookup and so were silently dead.)
         self.seniority_penalties = {
             SeniorityLevel.PRINCIPAL: -15.0,
             SeniorityLevel.LEAD: -12.0,
             SeniorityLevel.DIRECTOR: -20.0,
             SeniorityLevel.EXECUTIVE: -25.0,
-            SeniorityLevel.HEAD_OF_PRODUCT: -18.0,  # Will be added dynamically
-            SeniorityLevel.VP_PRODUCT: -22.0,      # Will be added dynamically
-            SeniorityLevel.GROUP_PM: -16.0         # Will be added dynamically
         }
-        
-        # Experience fit bonuses
+
+        # Experience fit bonuses, tuned for a career switcher with roughly zero
+        # years *in product*. The previous bands treated a 2-6 year ask as the
+        # "sweet spot" and only penalised past 8 years, which rewarded exactly
+        # the postings that screen out a first-time PM.
         self.experience_bonuses = {
-            (2, 6): 8.0,    # Sweet spot for transition
-            (0, 2): 4.0,    # Entry level friendly
-            (6, 8): 2.0,    # Still acceptable
+            (0, 1): 10.0,   # Genuinely entry level
+            (2, 2): 8.0,    # Still realistic
+            (3, 3): 5.0,    # Stretch, but reachable
         }
-        
+
         # Experience penalties
         self.experience_penalties = {
-            (8, 15): -6.0,   # Too senior for transition
-            (15, 25): -12.0,  # Definitely too senior
+            (4, 5): -8.0,    # Screening for an existing PM
+            (6, 25): -15.0,  # Well outside a transition profile
         }
     
     def detect_seniority_level(self, title: str, description: str = "", years_required: Optional[int] = None) -> SeniorityLevel:

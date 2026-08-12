@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 from app.core.logging import logger
 from .title_filters import is_pm_role, is_reject_role
-from .seniority import SeniorityDetector, SeniorityLevel
+from .seniority import SeniorityDetector, SeniorityLevel, extract_min_years_required
 from app.services.source_intelligence.source_weights import SourceWeightManager
 
 
@@ -110,6 +110,23 @@ class ScoringEngine:
             # Calculate raw cumulative sum and normalize to standard 100-point scale
             raw_sum = sum(scores.values())
             final_score = min((raw_sum / 120.0) * 100.0, 100.0)
+
+            # 8b. Experience-fit adjustment.
+            #
+            # Applied after normalisation rather than as a ninth weighted
+            # component, so the existing components keep their calibration.
+            #
+            # This correction matters because the rest of the scoring works
+            # against the transition: semantic similarity is measured against a
+            # resume dense with 4.5 years of technical work, so job descriptions
+            # written for experienced hires match it *better*. Without this,
+            # postings demanding 5-6 years consistently outranked the genuinely
+            # entry-level ones they should lose to.
+            experience_years = extract_min_years_required(getattr(job_data, 'jd_text', '') or '')
+            experience_adjustment = self.seniority_detector.calculate_experience_fit_score(
+                experience_years
+            )["score"] if experience_years is not None else 0.0
+            final_score = max(min(final_score + experience_adjustment, 100.0), 0.0)
             
             # Generate human-readable relevance reason
             relevance_reason = self._generate_relevance_reason(

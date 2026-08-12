@@ -25,6 +25,7 @@ day at `DELIVERY_HOUR`.
  2. FETCH      fetchers/orchestrator.py     ~8 sources, concurrent, browser fallback
        |                                     -> location policy
        |                                     -> recruiter-repost filter
+       |                                     -> experience-requirement filter
        |                                     -> PM title prefilter
        |                                     -> dedupe -> SQLite
        |
@@ -89,6 +90,17 @@ placeholder company names, staffing/recruitment keywords, and JD prose leaked
 into the company-name field. Bare "consulting"/"consultancy"/"solutions" are
 intentionally *not* flagged — real employers use them.
 
+**Experience requirements** (`ai/seniority.py`)
+`MAX_YEARS_REQUIRED = 3`. The JD *body* is parsed for the lowest credible years
+demand and the posting is dropped above that bar. This cannot be done from
+titles: postings titled "Associate Product Manager" have been observed demanding
+6 years. Postings that state no requirement are kept, since silence usually
+means flexible or junior-friendly.
+
+The parser ignores year counts that describe the company rather than the
+candidate ("founded 10 years ago", "over the last 5 years"), and takes the floor
+of a range, since that is what actually gates an applicant.
+
 **Titles** (`ai/title_filters.py`)
 `get_title_category()` returns `pm` / `reject` / `unknown` in staged precedence:
 seniority markers → too-senior product roles → allowed target roles → generic
@@ -114,6 +126,15 @@ director/VP roles aren't realistic first product roles.
 | `qa_to_pm_score` | Transition fit for a QA background |
 | `salary_score` | Parsed compensation vs preferences (handles LPA format) |
 | Title/seniority | Bonuses for AI/Platform/Technical PM; penalties otherwise |
+| Experience fit | Applied after normalization; bonus for 0-3 year asks |
+
+The experience-fit adjustment exists because the rest of the scoring works
+*against* the transition. Semantic similarity is measured against a resume dense
+with 4.5 years of technical work, so job descriptions written for experienced
+hires match it better. Before this correction, postings demanding 5-6 years
+consistently outranked genuinely entry-level ones: an APM role asking for 1 year
+scored 57.9 and was cut, while an "Associate PM" demanding 6 years scored 62.0
+and was delivered.
 
 The profile comes from `data/resume.pdf` via `ai/resume_parser.py` +
 `ai/profile_builder.py`. **If that file is absent the scorer silently falls back
@@ -206,6 +227,8 @@ Check these before debugging an empty or low-quality digest.
 
 ## Known Gaps
 
+- `EXPORT_ENABLED` is read into config but never used, so the daily run never
+  writes to `exports/`; only `generate_daily_shortlist.py` calls the exporter
 - Instahyre disabled pending one-time login automation
 - Playwright browser concurrency pinned to 1 (Windows cleanup hang unresolved)
 - Captcha handling not implemented
