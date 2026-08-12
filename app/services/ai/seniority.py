@@ -32,15 +32,25 @@ _YEARS_NEGATIVE_CTX = re.compile(
 )
 
 
-def extract_min_years_required(text: str) -> Optional[int]:
-    """Extract the lowest credible years-of-experience demand from a JD.
+def extract_required_years(text: str) -> Optional[int]:
+    """Extract the effective years-of-experience bar a JD sets.
 
     Returns None when the posting states no requirement, which is common and is
     deliberately *not* treated as disqualifying -- unstated usually means
     flexible or junior-friendly.
 
-    For a range ("5-7 years") the floor is what actually gates an applicant, so
-    the lower bound is used.
+    Two different rules apply, and conflating them badly understates the bar:
+
+    * Within a single range ("9-14 years") the *floor* is what gates an
+      applicant, so the lower bound is used.
+    * Across separate mentions the *maximum* is the real bar, because smaller
+      figures are almost always sub-requirements nested inside a larger one.
+      A posting reading "Minimum of 9 yrs as Business Analyst, 2 yrs as Product
+      Owner" demands nine years, not two; "5+ years as a product owner, 3+
+      years with Agile" demands five, not three.
+
+    Taking a global minimum instead lets one incidental small number wave
+    through a posting that is far out of reach.
     """
     if not text:
         return None
@@ -63,7 +73,11 @@ def extract_min_years_required(text: str) -> Optional[int]:
         candidates.append(int(match.group(1)))
 
     credible = [c for c in candidates if 0 < c <= 25]
-    return min(credible) if credible else None
+    return max(credible) if credible else None
+
+
+# Kept so existing imports keep working; the name understated what it returns.
+extract_min_years_required = extract_required_years
 
 
 def exceeds_experience_bar(

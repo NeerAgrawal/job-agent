@@ -97,9 +97,19 @@ titles: postings titled "Associate Product Manager" have been observed demanding
 6 years. Postings that state no requirement are kept, since silence usually
 means flexible or junior-friendly.
 
-The parser ignores year counts that describe the company rather than the
-candidate ("founded 10 years ago", "over the last 5 years"), and takes the floor
-of a range, since that is what actually gates an applicant.
+Two rules apply, and conflating them badly understates the bar:
+
+- **Within a range** ("9-14 years") the *floor* gates the applicant → 9.
+- **Across separate mentions** the *maximum* is the real bar, because smaller
+  figures are usually sub-requirements nested in a larger one. "Minimum of 9 yrs
+  as Business Analyst, 2 yrs as Product Owner" demands nine years, not two.
+
+Taking a global minimum instead lets one incidental small number wave through a
+posting that is far out of reach — a 9-year Product Owner role was delivered
+that way because the JD also mentioned "2 yrs as Product Owner".
+
+The parser also ignores year counts describing the company rather than the
+candidate ("founded 10 years ago", "over the last 5 years").
 
 **Titles** (`ai/title_filters.py`)
 `get_title_category()` returns `pm` / `reject` / `unknown` in staged precedence:
