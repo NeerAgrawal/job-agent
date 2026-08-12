@@ -10,6 +10,7 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
+from app.database.engine import engine
 from app.services.shortlist import ShortlistGenerator, ShortlistExporter
 from app.services.shortlist.cleanup import JobCleanup
 from app.core.logging import logger
@@ -100,6 +101,11 @@ async def main():
         logger.error(f"Daily shortlist generation failed: {e}")
         print(f"\n❌ Error: {e}")
         sys.exit(1)
+
+    finally:
+        # Dispose the pool or aiosqlite's non-daemon threads keep this script
+        # alive after it has finished, holding a lock on data/jobs.db.
+        await engine.dispose()
 
 
 if __name__ == "__main__":

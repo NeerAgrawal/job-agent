@@ -5,6 +5,8 @@ import asyncio
 import sys
 from pathlib import Path
 
+from sqlalchemy import text
+
 # Add project root to Python path
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
@@ -34,7 +36,7 @@ async def init_database():
             # Verify each table exists
             for table_name in tables:
                 try:
-                    result = await conn.execute(f"SELECT COUNT(*) FROM {table_name}")
+                    result = await conn.execute(text(f"SELECT COUNT(*) FROM {table_name}"))
                     count = result.scalar()
                     logger.info(f"Table '{table_name}' exists with {count} rows")
                 except Exception as e:
@@ -46,6 +48,12 @@ async def init_database():
     except Exception as e:
         logger.error(f"Database initialization failed: {e}")
         return False
+
+    finally:
+        # aiosqlite backs each pooled connection with a non-daemon thread, so
+        # the process will not exit while the pool is still open. Dispose the
+        # engine explicitly or this script hangs after finishing its work.
+        await engine.dispose()
 
 
 def main():
