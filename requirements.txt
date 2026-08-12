@@ -31,8 +31,11 @@ apscheduler==3.10.4
 # Logging
 loguru==0.7.2
 
-# Future Support (placeholders)
-playwright==1.40.0
+# Browser automation.
+# Pinned to 1.40.0 previously: that build's bundled Chromium 120 fails to start
+# on current Windows with a side-by-side activation error, and its driver cannot
+# talk to modern system Chrome/Edge either. 1.55+ ships a working browser build.
+playwright>=1.55.0
 python-telegram-bot==20.7
 
 # Development
