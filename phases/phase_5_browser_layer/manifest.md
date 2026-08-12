@@ -23,7 +23,7 @@ These advanced browser-automations are placed under the specialized fallback lib
 
 Trigger browser-level scripts to test real visual-rendering loops:
 
-*   **Browser Fetch Runner**: `scripts/testing/test_fetchers.py` (Specify browser engines).
+*   **Browser Fetch Runner**: `phases/phase_5_source_intelligence/test_fetchers.py` (Specify browser engines).
 *   **Cached Cookie Hub**: Review JSON files under `/sessions/`.
 
 ---

@@ -24,8 +24,8 @@ These service packages are driven by the Open AI framework to achieve intelligen
 
 Verify and tune the intelligence algorithms using:
 
-*   **AI Evaluator Run**: `scripts/testing/test_ai_matching.py`
-*   **Rank Scorer Visualizer**: `scripts/debug/view_ranked_jobs.py`
+*   **AI Evaluator Run**: `phases/phase_2_scoring/test_ai_matching.py`
+*   **Rank Scorer Visualizer**: `phases/phase_2_scoring/view_ranked_jobs.py`
 
 ---
 

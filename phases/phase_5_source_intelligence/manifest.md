@@ -24,8 +24,8 @@ These modules house the intelligence logic mapping back to individual job boards
 
 Verify that crawlers are correctly bypassing anti-bot systems and resolving schemas:
 
-*   **Multi-Fetcher Smoke**: `scripts/testing/test_fetchers.py`
-*   **Async Aggregator Smoke**: `scripts/testing/async_smoke_test.py`
+*   **Multi-Fetcher Smoke**: `phases/phase_5_source_intelligence/test_fetchers.py`
+*   **Async Aggregator Smoke**: `phases/phase_5_source_intelligence/async_smoke_test.py`
 
 ---
 

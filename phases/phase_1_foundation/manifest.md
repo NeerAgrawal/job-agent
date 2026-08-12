@@ -25,9 +25,9 @@ The following components in the codebase form the foundation layer:
 
 Verify and maintain this phase using the following utilities:
 
-*   **Database Initialization**: `scripts/maintenance/init_db.py`
-*   **FastAPI API Launch**: `scripts/production/start_api.bat`
-*   **General Health / Smoke Verification**: `scripts/testing/smoke_test.py`
+*   **Database Initialization**: `phases/phase_1_foundation/init_db.py`
+*   **FastAPI API Launch**: `phases/phase_1_foundation/start_api.bat`
+*   **General Health / Smoke Verification**: `phases/phase_1_foundation/smoke_test.py`
 
 ---
 

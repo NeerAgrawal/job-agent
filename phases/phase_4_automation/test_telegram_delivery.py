@@ -9,7 +9,7 @@ This script tests:
 - Duplicate prevention
 
 Usage:
-    python scripts/test_telegram_delivery.py [--test-digest] [--test-connection] [--send-test]
+    python phases/phase_4_automation/test_telegram_delivery.py [--test-digest] [--test-connection] [--send-test]
 """
 
 import asyncio

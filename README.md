@@ -1,213 +1,147 @@
 # Job AI Agent
 
-A local-first AI-powered Product Manager job acquisition system built with Python, FastAPI, and Streamlit.
+A local-first system that runs a Product Manager job hunt end to end: fetch
+postings from ~8 sources, filter them hard against a specific candidate profile,
+score them with embeddings, and deliver a daily Telegram digest — with an
+LLM-tailored resume PDF attached for the strongest matches.
 
-## 🚀 Features
+Built for a QA → Product transition targeting India (any work mode) plus
+international roles that explicitly accept India-based candidates.
 
-- **Local-first Architecture**: All data stored locally with SQLite
-- **AI-Powered Job Matching**: Intelligent job filtering and ranking
-- **Automated Job Fetching**: Scheduled fetching from multiple job boards
-- **Web Dashboard**: Beautiful Streamlit interface for monitoring
-- **REST API**: FastAPI backend for programmatic access
-- **Async-Ready**: Full async/await support throughout
-- **Extensible**: Modular design for easy feature additions
+See [architecture.md](architecture.md) for how it works and why the filters are
+shaped the way they are.
 
-## 🛠️ Tech Stack
+## Tech Stack
 
-- **Backend**: FastAPI, SQLAlchemy, APScheduler
-- **Frontend**: Streamlit
-- **Database**: SQLite (with PostgreSQL support ready)
-- **AI**: OpenAI API integration
-- **HTTP Client**: httpx for async requests
-- **Logging**: loguru for structured logging
-- **Future Support**: Playwright (web scraping), Telegram Bot API
+Python 3.11 · FastAPI · Streamlit · SQLAlchemy/SQLite · APScheduler ·
+Playwright · sentence-transformers · Groq/OpenAI · loguru
 
-## 📋 Prerequisites
+## Setup
 
-- Python 3.11+
-- Git
+**Prerequisites:** Python 3.11+, and a LaTeX distribution providing `pdflatex`
+(MiKTeX or TeX Live) if you want tailored-resume attachments.
 
-## 🚀 Quick Start
-
-1. **Clone the repository**
-   ```bash
-   git clone <repository-url>
-   cd job_ai_agent
-   ```
-
-2. **Create virtual environment**
-   ```bash
-   python -m venv venv
-   
-   # Windows
-   venv\Scripts\activate
-   
-   # Unix/MacOS
-   source venv/bin/activate
-   ```
-
-3. **Install dependencies**
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-4. **Configure environment**
-   ```bash
-   cp .env.example .env
-   # Edit .env with your configuration
-   ```
-
-5. **Initialize database**
-   ```bash
-   python -c "from app.core.database import init_db; import asyncio; asyncio.run(init_db())"
-   ```
-
-6. **Start the applications**
-   
-   **Option 1: Use startup scripts**
-   ```bash
-   # Start API server
-   scripts/start_api.bat
-   
-   # Start Streamlit app (in separate terminal)
-   scripts/start_streamlit.bat
-   ```
-   
-   **Option 2: Manual startup**
-   ```bash
-   # Start API server
-   python -m app.main
-   
-   # Start Streamlit app (in separate terminal)
-   streamlit run app/web/app.py
-   ```
-
-7. **Access the applications**
-   - API: http://localhost:8000
-   - API Docs: http://localhost:8000/docs
-   - Streamlit Dashboard: http://localhost:8501
-
-## 📁 Project Structure
-
-```
-job_ai_agent/
-├── app/
-│   ├── api/                    # FastAPI routes and dependencies
-│   │   ├── v1/                # API version 1 routes
-│   │   └── dependencies/       # FastAPI dependencies
-│   ├── core/                   # Core application logic
-│   │   ├── config/           # Configuration management
-│   │   ├── database/         # Database setup and connection
-│   │   └── logging/          # Logging configuration
-│   ├── models/                 # Data models and schemas
-│   │   ├── entities/         # SQLAlchemy models
-│   │   └── schemas/          # Pydantic schemas
-│   ├── services/              # Business logic services
-│   │   ├── fetchers/         # Job board fetchers
-│   │   ├── ai/               # AI processing services
-│   │   └── notifications/    # Notification services
-│   ├── web/                   # Streamlit web interface
-│   │   ├── pages/            # Streamlit pages
-│   │   └── components/       # Reusable components
-│   ├── utils/                 # Utility functions
-│   └── main.py               # FastAPI application entry point
-├── scripts/                   # Startup and utility scripts
-├── tests/                     # Test files
-├── logs/                      # Application logs
-├── data/                      # Database files
-├── requirements.txt           # Python dependencies
-├── .env.example              # Environment template
-└── README.md                 # This file
+```bash
+python -m venv venv
+venv\Scripts\activate          # Windows
+pip install -r requirements.txt
+playwright install chromium
 ```
 
-## ⚙️ Configuration
+Configure secrets:
 
-The application uses environment variables for configuration. Copy `.env.example` to `.env` and customize:
+```bash
+copy .env.example .env         # Windows
+```
 
-### Core Settings
-- `APP_NAME`: Application name
-- `DEBUG`: Enable debug mode
-- `ENVIRONMENT`: Environment (development/production)
+Then fill in `.env`:
 
-### Database
-- `DATABASE_URL`: Database connection string
+| Variable | Needed for |
+| :--- | :--- |
+| `GROQ_API_KEY` *(or `OPENAI_API_KEY`)* | Resume tailoring. Groq takes precedence |
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | Digest delivery |
+| `MIN_SCORE_THRESHOLD` | Quality bar for the shortlist (default 60) |
+| `DELIVERY_HOUR` | Hour of day to run (default 9) |
+| `WELLFOUND_EMAIL`, `WELLFOUND_PASSWORD` | Wellfound browser fetcher (optional) |
 
-### API Settings
-- `API_HOST`: API server host
-- `API_PORT`: API server port
+Add your resume — **both files matter**:
 
-### AI Configuration
-- `OPENAI_API_KEY`: OpenAI API key for AI features
-- `AI_MODEL`: OpenAI model to use
+- `data/resume.pdf` — parsed to build the scoring profile. Without it, scoring
+  silently falls back to a generic baseline PM profile and ranks against the
+  wrong person.
+- `data/master_resume.txt` — the content bank the LLM draws on when tailoring.
 
-### Scheduler
-- `SCHEDULER_ENABLED`: Enable job fetching scheduler
-- `FETCH_INTERVAL_HOURS`: Job fetching interval
-- `MAX_JOBS_PER_RUN`: Maximum jobs to fetch per run
+Initialize the database:
 
-## 🔧 Development
+```bash
+python phases/phase_1_foundation/init_db.py
+```
 
-### Running Tests
+## Usage
+
+Run the full pipeline once:
+
+```bash
+python phases/phase_4_automation/run_daily_automation.py --run-now
+```
+
+Other entry points:
+
+```bash
+python phases/phase_4_automation/run_daily_automation.py --dry-run
+```
+
+```bash
+python phases/phase_4_automation/test_telegram_delivery.py --test-connection
+```
+
+```bash
+python phases/phase_3_shortlist/generate_daily_shortlist.py
+```
+
+```bash
+python phases/phase_5_source_intelligence/test_fetchers.py
+```
+
+Optional API and dashboard:
+
+```bash
+python -m app.main
+```
+
+```bash
+streamlit run app/web/app.py
+```
+
+API docs at `http://localhost:8000/docs`, dashboard at `http://localhost:8501`.
+
+## Project Layout
+
+```
+app/
+  core/          config, logging, database connection
+  models/        SQLAlchemy entities
+  repositories/  CRUD per entity
+  services/
+    ai/                    embeddings, scoring, title filters, resume parsing
+    fetchers/              orchestrator, per-source fetchers, browser layer
+    shortlist/             generation, formatting, export, cleanup
+    automation/            scheduler, telegram, digest, link verification
+    source_intelligence/   prefilter, quality filter, source health
+    resume/                parsing, analysis, optimization, variants
+  web/           Streamlit dashboard
+  main.py        FastAPI entry point
+phases/          per-phase manifests + runnable scripts
+tests/           unit + integration
+archive/         superseded experiments
+```
+
+Each `phases/*/manifest.md` documents that phase's components and current status
+— these are the accurate progress record.
+
+## Troubleshooting
+
+**Empty or low-quality digest?** Check the runtime prerequisites before
+debugging logic. Missing files degrade silently rather than crashing:
+
+| Symptom | Likely cause |
+| :--- | :--- |
+| Scores look generic / irrelevant | `data/resume.pdf` missing |
+| Digest never arrives | `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` unset |
+| No resume attached to high scorers | `pdflatex` not on PATH |
+| A source returns 0 jobs | Site markup changed; check the browser fallback |
+| Nothing from Instahyre | Disabled by design — login-gated, see architecture.md |
+
+## Development
+
 ```bash
 pytest
 ```
 
-### Code Formatting
 ```bash
-black app/
-isort app/
+black app/ && isort app/
 ```
 
-### Type Checking
-```bash
-mypy app/
-```
+## License
 
-## 🚀 Deployment
-
-### Docker (Future)
-```bash
-docker build -t job-ai-agent .
-docker run -p 8000:8000 -p 8501:8501 job-ai-agent
-```
-
-### Production Considerations
-- Use PostgreSQL instead of SQLite for production
-- Configure proper CORS origins
-- Set up SSL certificates
-- Use environment-specific configuration
-- Set up proper logging and monitoring
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests for new functionality
-5. Submit a pull request
-
-## 📝 License
-
-This project is licensed under the MIT License.
-
-## 🔮 Roadmap
-
-- [ ] Job board fetchers (LinkedIn, Indeed, Glassdoor)
-- [ ] AI-powered job matching and ranking
-- [ ] Automated application submissions
-- [ ] Interview scheduling integration
-- [ ] Telegram bot notifications
-- [ ] Advanced analytics and reporting
-- [ ] Resume optimization suggestions
-- [ ] Company research automation
-
-## 🆘 Support
-
-For issues and questions:
-1. Check the [Issues](../../issues) page
-2. Create a new issue with detailed information
-3. Include logs and configuration details
-
----
-
-**Built with ❤️ for PMs seeking their next opportunity**
+MIT

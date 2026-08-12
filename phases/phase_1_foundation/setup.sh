@@ -46,8 +46,8 @@ echo
 echo "🎉 Setup complete!"
 echo
 echo "🚀 To start the applications:"
-echo "   API Server:     ./scripts/start_api.sh"
-echo "   Streamlit App:  ./scripts/start_streamlit.sh"
+echo "   API Server:     ./phases/phase_1_foundation/start_api.sh"
+echo "   Streamlit App:  ./phases/phase_1_foundation/start_streamlit.sh"
 echo
 echo "🌐 Access points:"
 echo "   API:           http://localhost:8000"

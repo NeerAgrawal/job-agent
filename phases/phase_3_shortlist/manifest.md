@@ -21,7 +21,7 @@ The shortlist domain operates as an analytical pipeline to distill hundreds of r
 
 Generate and inspect the reports using:
 
-*   **Ad-Hoc Report Creation**: `scripts/production/generate_daily_shortlist.py`
+*   **Ad-Hoc Report Creation**: `phases/phase_3_shortlist/generate_daily_shortlist.py`
 *   **Formatted Exports Sink**: Check files written to `/exports/` directory.
 
 ---

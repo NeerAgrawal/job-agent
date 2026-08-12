@@ -21,8 +21,8 @@ These automation engines provide high-frequency operational status and push deli
 
 Monitor and trigger automation flow using:
 
-*   **Push Notification Check**: `scripts/testing/test_telegram_delivery.py`
-*   **Full Cycle Simulator**: `scripts/production/run_daily_automation.py`
+*   **Push Notification Check**: `phases/phase_4_automation/test_telegram_delivery.py`
+*   **Full Cycle Simulator**: `phases/phase_4_automation/run_daily_automation.py`
 
 ---
 
