@@ -12,7 +12,7 @@ This script runs the complete daily pipeline:
 7. Track deliveries
 
 Usage:
-    python scripts/run_daily_automation.py [--test] [--status] [--run-now]
+    python phases/phase_4_automation/run_daily_automation.py [--test] [--status] [--run-now]
 """
 
 import asyncio
@@ -24,7 +24,8 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from app.services.automation.scheduler import DailyScheduler, AutomationConfig
+from app.database.engine import engine
+from app.services.automation.scheduler import DailyScheduler
 from app.services.automation.telegram import TelegramService
 from app.services.automation.digest import DigestFormatter
 from app.services.automation.delivery_tracker import DeliveryTracker
@@ -52,9 +53,11 @@ async def main():
         )
     
     try:
-        # Initialize scheduler
-        config = AutomationConfig()
-        scheduler = DailyScheduler(config)
+        # Initialize scheduler. Pass no config so DailyScheduler runs its own
+        # _load_config() and picks settings up from the environment/.env --
+        # constructing AutomationConfig() here would pin every value to its
+        # hardcoded default and silently ignore .env.
+        scheduler = DailyScheduler()
         
         if args.status:
             await show_status(scheduler)
@@ -76,6 +79,13 @@ async def main():
     except Exception as e:
         logger.error(f"Automation failed: {e}")
         sys.exit(1)
+
+    finally:
+        # aiosqlite backs each pooled connection with a non-daemon thread, so the
+        # process will not exit while the pool is open -- the one-shot modes
+        # (--run-now/--status/--test) would otherwise finish their work and then
+        # hang forever, holding a lock on data/jobs.db.
+        await engine.dispose()
 
 
 async def show_status(scheduler: DailyScheduler) -> None:

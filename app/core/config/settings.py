@@ -2,6 +2,17 @@ from pydantic_settings import BaseSettings
 from pydantic import Field
 from typing import Optional
 
+from dotenv import load_dotenv
+
+# Load .env into the process environment as well.
+#
+# BaseSettings below reads .env on its own, but several modules (notably
+# AutomationConfig in app/services/automation/scheduler.py) read configuration
+# via os.getenv, which only sees the real process environment. Without this,
+# every such setting silently falls back to its hardcoded default no matter what
+# .env says. override=False keeps real environment variables authoritative.
+load_dotenv(override=False)
+
 
 class Settings(BaseSettings):
     """Application settings with environment variable support."""
@@ -49,7 +60,7 @@ class Settings(BaseSettings):
     # Instahyre Authentication
     instahyre_email: Optional[str] = Field(
         default=None,
-        env="neeragrawal05@gmail.com"
+        env="INSTAHYRE_EMAIL"
     )
 
     instahyre_session_file: str = Field(
