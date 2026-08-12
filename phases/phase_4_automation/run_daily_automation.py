@@ -159,7 +159,7 @@ async def run_automation(scheduler: DailyScheduler, dry_run: bool = False) -> No
     
     try:
         # Run the automation
-        stats = await scheduler.run_now()
+        stats = await scheduler.run_now(dry_run=dry_run)
         
         end_time = asyncio.get_event_loop().time()
         duration = end_time - start_time

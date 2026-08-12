@@ -104,11 +104,15 @@ class DailyScheduler:
         except Exception as e:
             self.logger.error(f"Failed to stop scheduler: {e}")
     
-    async def run_now(self) -> Dict[str, Any]:
-        """Run the daily automation immediately."""
-        return await self._run_daily_automation()
-    
-    async def _run_daily_automation(self) -> Dict[str, Any]:
+    async def run_now(self, dry_run: bool = False) -> Dict[str, Any]:
+        """Run the daily automation immediately.
+
+        With dry_run=True every step runs except Telegram delivery, so nothing
+        is sent and no job is recorded as delivered.
+        """
+        return await self._run_daily_automation(dry_run=dry_run)
+
+    async def _run_daily_automation(self, dry_run: bool = False) -> Dict[str, Any]:
         """Run the complete daily automation pipeline."""
         start_time = datetime.utcnow()
         stats = {
@@ -141,7 +145,12 @@ class DailyScheduler:
             shortlist_jobs = await self._run_shortlist_generation(stats)
             
             # Step 5: Send Telegram digest
-            if self.config.telegram_enabled and shortlist_jobs:
+            if dry_run:
+                stats["dry_run"] = True
+                self.logger.info(
+                    f"🔍 Dry run - skipping Telegram delivery of {len(shortlist_jobs)} jobs"
+                )
+            elif self.config.telegram_enabled and shortlist_jobs:
                 await self._run_telegram_delivery(shortlist_jobs, stats)
             
             # Mark as successful
